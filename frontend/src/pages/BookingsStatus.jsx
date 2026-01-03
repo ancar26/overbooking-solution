@@ -193,7 +193,19 @@ function BookingsStatus() {
 
         {pendingBookings.length > 0 && (
           <section className="bookings-section">
-            <h3 className="section-title">⚠️ Pending Bookings ({pendingBookings.filter(b => b.status === 'PENDING').length})</h3>
+            <h3 className="section-title">
+              ⚠️ Bookings to Review ({pendingBookings.length})
+              {(() => {
+                const pending = pendingBookings.filter(b => b.status === 'PENDING').length
+                const rejected = pendingBookings.filter(b => b.status === 'AUTO_REJECTED').length
+                if (pending > 0 && rejected > 0) {
+                  return <span className="section-subtitle"> — {pending} pending, {rejected} auto-rejected</span>
+                } else if (rejected > 0) {
+                  return <span className="section-subtitle"> — all auto-rejected</span>
+                }
+                return null
+              })()}
+            </h3>
             <div className="bookings-list">
                 {pendingBookings.map((booking, index) => {
                   const positionNames = ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th', '9th', '10th']

@@ -109,6 +109,12 @@
   margin-bottom: 20px;
 }
 
+.section-subtitle {
+  font-size: 14px;
+  font-weight: normal;
+  color: #7f8c8d;
+}
+
 .bookings-list {
   display: flex;
   flex-direction: column;
