@@ -1,42 +1,60 @@
 import { useState, useEffect } from 'react'
 import '../styles/Pages.css'
 
-const API_URL = '/api' // Uses Vite proxy in dev, works with ngrok
+const API_URL = '/api'
 
 function OwnerProfile() {
   const [profile, setProfile] = useState(null)
+  const [bookings, setBookings] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
   useEffect(() => {
-    fetchProfile()
-    // Refresh every 5 seconds to get real-time updates
-    const interval = setInterval(fetchProfile, 5000)
-    return () => clearInterval(interval)
+    fetchData()
   }, [])
 
-  const fetchProfile = async () => {
+  const fetchData = async () => {
     try {
-      const response = await fetch(`${API_URL}/profile`)
-      if (!response.ok) {
-        throw new Error('Failed to fetch profile')
+      const [profileRes, bookingsRes] = await Promise.all([
+        fetch(`${API_URL}/profile`),
+        fetch(`${API_URL}/bookings`)
+      ])
+
+      if (!profileRes.ok || !bookingsRes.ok) {
+        throw new Error('Failed to fetch data')
       }
-      const data = await response.json()
-      setProfile(data)
+
+      const profileData = await profileRes.json()
+      const bookingsData = await bookingsRes.json()
+
+      setProfile(profileData)
+      setBookings(bookingsData)
       setError(null)
     } catch (err) {
       setError('Could not connect to backend. Make sure the backend server is running on port 3000.')
-      console.error('Error fetching profile:', err)
+      console.error('Error fetching data:', err)
     } finally {
       setLoading(false)
     }
   }
 
+  // Get unique platforms from bookings
+  const getPlatforms = () => {
+    const platforms = [...new Set(bookings.map(b => b.platform))]
+    return platforms
+  }
+
+  // Get bookings by platform
+  const getBookingsByPlatform = (platform) => {
+    return bookings.filter(b => b.platform === platform).length
+  }
+
   if (loading) {
     return (
-      <div className="page-container">
-        <div className="page-content">
-          <p>Loading...</p>
+      <div className="profile-page">
+        <div className="profile-loading">
+          <div className="loading-spinner"></div>
+          <p>Loading property info...</p>
         </div>
       </div>
     )
@@ -44,13 +62,11 @@ function OwnerProfile() {
 
   if (error) {
     return (
-      <div className="page-container">
-        <div className="page-content">
-          <div className="error-message">
-            <h2>⚠️ Connection Error</h2>
-            <p>{error}</p>
-            <p>Make sure to run: <code>cd backend && npm start</code></p>
-          </div>
+      <div className="profile-page">
+        <div className="profile-error">
+          <h2>⚠️ Connection Error</h2>
+          <p>{error}</p>
+          <p className="error-hint">Make sure to run: <code>cd backend && npm start</code></p>
         </div>
       </div>
     )
@@ -58,68 +74,70 @@ function OwnerProfile() {
 
   if (!profile) {
     return (
-      <div className="page-container">
-        <div className="page-content">
+      <div className="profile-page">
+        <div className="profile-error">
           <p>No profile data available.</p>
         </div>
       </div>
     )
   }
 
+  const platforms = getPlatforms()
+
   return (
-    <div className="page-container">
-      <div className="page-content">
-        <header className="page-header">
-          <h2>Property Owner Profile</h2>
+    <div className="profile-page">
+      <div className="profile-container">
+        <header className="profile-header">
+          <h1>{profile.propertyName}</h1>
+          <p className="profile-subtitle">Property Overview</p>
         </header>
 
-        <div className="profile-card">
-          <div className="profile-info">
-            <div className="profile-row">
-              <strong>Name:</strong>
-              <span>{profile.name}</span>
-            </div>
-            
-            <div className="profile-row">
-              <strong>Property:</strong>
-              <span>{profile.propertyName}</span>
-            </div>
-            
-            <div className="profile-row">
-              <strong>Total number of rooms:</strong>
-              <span>{profile.totalRooms}</span>
-            </div>
-            
-            <div className="profile-row">
-              <strong>Total number of beds:</strong>
-              <span>{profile.totalBeds}</span>
-            </div>
-            
-            <div className="profile-row">
-              <strong>Booked beds:</strong>
-              <span className={profile.bookedBeds > 0 ? 'booked-beds' : ''}>
-                {profile.bookedBeds || 0}
-              </span>
-            </div>
-            
-            <div className="profile-row">
-              <strong className={profile.availableBeds < 5 ? 'low-beds' : ''}>
-                Available Beds:
-              </strong>
-              <span className={profile.availableBeds < 5 ? 'low-beds' : ''}>
-                {profile.availableBeds}
-              </span>
-            </div>
-            
-            <div className="profile-row">
-              <strong>Email:</strong>
-              <span>{profile.email}</span>
+        <div className="profile-grid">
+          {/* Property Stats */}
+          <div className="profile-card stats-card">
+            <h3>Property Statistics</h3>
+            <div className="stats-grid stats-grid-2">
+              <div className="stat-item">
+                <span className="stat-value">{profile.totalRooms}</span>
+                <span className="stat-label">Rooms</span>
+              </div>
+              <div className="stat-item">
+                <span className="stat-value">{bookings.length}</span>
+                <span className="stat-label">Bookings</span>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div className="info-box">
-          <p>📊 This page updates automatically every 5 seconds to show real-time bed availability.</p>
+          {/* Owner Info */}
+          <div className="profile-card info-card">
+            <h3>Owner Information</h3>
+            <div className="info-list">
+              <div className="info-row">
+                <span className="info-label">Name</span>
+                <span className="info-value">{profile.name}</span>
+              </div>
+              <div className="info-row">
+                <span className="info-label">Email</span>
+                <span className="info-value email">{profile.email}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Booking Sources */}
+          <div className="profile-card sources-card">
+            <h3>Booking Sources</h3>
+            <div className="sources-list">
+              {platforms.map(platform => (
+                <div key={platform} className="source-item">
+                  <span className="source-name">{platform}</span>
+                  <span className="source-count">{getBookingsByPlatform(platform)} bookings</span>
+                </div>
+              ))}
+            </div>
+            <p className="sources-note">
+              Bookings are synced from external platforms. Conflicts are automatically prevented.
+            </p>
+          </div>
         </div>
       </div>
     </div>
@@ -127,4 +145,3 @@ function OwnerProfile() {
 }
 
 export default OwnerProfile
-

@@ -7,19 +7,19 @@ function Navigation() {
   return (
     <nav className="navigation">
       <div className="nav-container">
-        <h1 className="nav-logo">Overbooking Prevention</h1>
+        <h1 className="nav-logo">🏨 Booking Calendar</h1>
         <div className="nav-links">
           <Link 
             to="/" 
             className={location.pathname === '/' ? 'nav-link active' : 'nav-link'}
           >
-            Owner Profile
+            Property Info
           </Link>
           <Link 
             to="/bookings" 
             className={location.pathname === '/bookings' ? 'nav-link active' : 'nav-link'}
           >
-            Bookings Status
+            Calendar
           </Link>
         </div>
       </div>
@@ -28,4 +28,3 @@ function Navigation() {
 }
 
 export default Navigation
-

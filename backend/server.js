@@ -1,5 +1,6 @@
-// Backend server for overbooking prevention app
-// This server provides API endpoints for the frontend
+// Backend server for Booking Calendar App
+// Displays confirmed bookings from external platforms (Booking.com, Agoda)
+// Each room is private - only one booking per room at a time
 
 import express from 'express'
 import cors from 'cors'
@@ -7,54 +8,76 @@ import cors from 'cors'
 const app = express()
 const PORT = 3000
 
-// Enable CORS so frontend can talk to backend
 app.use(cors())
 app.use(express.json())
 
 // ============================================
-// MOCKED DATABASE (In-memory storage)
+// DATABASE (In-memory storage)
 // ============================================
 
 // Property configuration
-// 4 rooms, each with 5 beds = 20 total beds
 const ROOMS = ['A1', 'A2', 'B1', 'B2']
-const BEDS_PER_ROOM = 5
 
-// Property owner profile
-let propertyProfile = {
+// Property profile
+const propertyProfile = {
   id: 1,
   name: 'Property Owner',
-  propertyName: 'Sunset Hostel',
+  propertyName: 'Sunset Villa',
   totalRooms: 4,
-  totalBeds: 20, // 4 rooms × 5 beds
-  availableBeds: 2, // Will be calculated dynamically
   email: 'owner@example.com'
 }
 
-// Mocked bookings
-// CONFIRMED bookings: 18 beds occupied (2 available)
-// - Room A1: 4 beds occupied (Person 1-4)
-// - Room A2: 5 beds occupied (Person 5-9)
-// - Room B1: 5 beds occupied (Person 10-14)
-// - Room B2: 4 beds occupied (Person 15-18)
-// PENDING bookings: 6 people wanting beds
-// - 2 early bookings (can be approved to fill 20 beds)
-// - 4 late bookings (will auto-reject when capacity is full)
+// Booking platforms
+const PLATFORMS = ['Booking.com', 'Agoda']
 
-// Store initial bookings for reset functionality
-const INITIAL_BOOKINGS = [
-  // ========== ROOM A1: 4 beds occupied ==========
+// Color palette for bookings
+const BOOKING_COLORS = [
+  '#4CAF50', '#2196F3', '#FF9800', '#E91E63', '#9C27B0',
+  '#00BCD4', '#F44336', '#8BC34A', '#FF5722', '#3F51B5'
+]
+
+// Random guest names for demo
+const DEMO_FIRST_NAMES = [
+  'James', 'Maria', 'David', 'Sarah', 'Michael', 'Emma', 'John', 'Olivia',
+  'Robert', 'Sophia', 'William', 'Isabella', 'Thomas', 'Mia', 'Daniel', 'Charlotte'
+]
+
+const DEMO_LAST_NAMES = [
+  'Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Garcia', 'Miller', 'Davis',
+  'Rodriguez', 'Martinez', 'Wilson', 'Anderson', 'Taylor', 'Moore', 'Jackson', 'Lee'
+]
+
+function getBookingColor(bookingId) {
+  return BOOKING_COLORS[bookingId % BOOKING_COLORS.length]
+}
+
+function generateGuestName() {
+  const firstName = DEMO_FIRST_NAMES[Math.floor(Math.random() * DEMO_FIRST_NAMES.length)]
+  const lastName = DEMO_LAST_NAMES[Math.floor(Math.random() * DEMO_LAST_NAMES.length)]
+  return `${firstName} ${lastName}`
+}
+
+function generateEmail(name) {
+  const [first, last] = name.toLowerCase().split(' ')
+  return `${first}.${last.charAt(0)}@email.com`
+}
+
+let nextBookingId = 20
+
+// Confirmed bookings - NO OVERLAPPING dates per room
+// Each room is private, one guest at a time
+const bookings = [
+  // ========== ROOM A1 (sequential, no overlap) ==========
   {
     id: 1,
     platform: 'Booking.com',
     guestName: 'Alice Johnson',
     guestEmail: 'alice.j@email.com',
     roomNumber: 'A1',
-    beds: 1,
-    checkIn: '2024-02-15',
-    checkOut: '2024-02-18',
+    checkIn: '2026-01-02',
+    checkOut: '2026-01-05',
     status: 'CONFIRMED',
-    createdAt: '2024-02-01T08:00:00Z'
+    createdAt: '2025-12-20T08:00:00Z'
   },
   {
     id: 2,
@@ -62,60 +85,56 @@ const INITIAL_BOOKINGS = [
     guestName: 'Bob Smith',
     guestEmail: 'bob.s@email.com',
     roomNumber: 'A1',
-    beds: 1,
-    checkIn: '2024-02-15',
-    checkOut: '2024-02-18',
+    checkIn: '2026-01-06',
+    checkOut: '2026-01-10',
     status: 'CONFIRMED',
-    createdAt: '2024-02-01T09:00:00Z'
+    createdAt: '2025-12-21T09:00:00Z'
   },
   {
     id: 3,
-    platform: 'Hostelworld',
+    platform: 'Booking.com',
     guestName: 'Carol Davis',
     guestEmail: 'carol.d@email.com',
     roomNumber: 'A1',
-    beds: 1,
-    checkIn: '2024-02-15',
-    checkOut: '2024-02-18',
+    checkIn: '2026-01-12',
+    checkOut: '2026-01-16',
     status: 'CONFIRMED',
-    createdAt: '2024-02-01T10:00:00Z'
+    createdAt: '2025-12-22T10:00:00Z'
   },
   {
     id: 4,
-    platform: 'Booking.com',
+    platform: 'Agoda',
     guestName: 'Dan Wilson',
     guestEmail: 'dan.w@email.com',
     roomNumber: 'A1',
-    beds: 1,
-    checkIn: '2024-02-15',
-    checkOut: '2024-02-18',
+    checkIn: '2026-01-18',
+    checkOut: '2026-01-22',
     status: 'CONFIRMED',
-    createdAt: '2024-02-01T11:00:00Z'
+    createdAt: '2025-12-23T11:00:00Z'
   },
-  // ========== ROOM A2: 5 beds occupied (FULL) ==========
   {
     id: 5,
-    platform: 'Agoda',
-    guestName: 'Emma Brown',
-    guestEmail: 'emma.b@email.com',
-    roomNumber: 'A2',
-    beds: 1,
-    checkIn: '2024-02-15',
-    checkOut: '2024-02-18',
+    platform: 'Booking.com',
+    guestName: 'Eve Martinez',
+    guestEmail: 'eve.m@email.com',
+    roomNumber: 'A1',
+    checkIn: '2026-01-25',
+    checkOut: '2026-01-29',
     status: 'CONFIRMED',
-    createdAt: '2024-02-02T08:00:00Z'
+    createdAt: '2025-12-24T12:00:00Z'
   },
+  
+  // ========== ROOM A2 (sequential, no overlap) ==========
   {
     id: 6,
-    platform: 'Hostelworld',
+    platform: 'Agoda',
     guestName: 'Frank Miller',
     guestEmail: 'frank.m@email.com',
     roomNumber: 'A2',
-    beds: 1,
-    checkIn: '2024-02-15',
-    checkOut: '2024-02-18',
+    checkIn: '2026-01-03',
+    checkOut: '2026-01-07',
     status: 'CONFIRMED',
-    createdAt: '2024-02-02T09:00:00Z'
+    createdAt: '2025-12-18T08:00:00Z'
   },
   {
     id: 7,
@@ -123,11 +142,10 @@ const INITIAL_BOOKINGS = [
     guestName: 'Grace Lee',
     guestEmail: 'grace.l@email.com',
     roomNumber: 'A2',
-    beds: 1,
-    checkIn: '2024-02-15',
-    checkOut: '2024-02-18',
+    checkIn: '2026-01-08',
+    checkOut: '2026-01-12',
     status: 'CONFIRMED',
-    createdAt: '2024-02-02T10:00:00Z'
+    createdAt: '2025-12-19T09:00:00Z'
   },
   {
     id: 8,
@@ -135,60 +153,56 @@ const INITIAL_BOOKINGS = [
     guestName: 'Henry Taylor',
     guestEmail: 'henry.t@email.com',
     roomNumber: 'A2',
-    beds: 1,
-    checkIn: '2024-02-15',
-    checkOut: '2024-02-18',
+    checkIn: '2026-01-14',
+    checkOut: '2026-01-18',
     status: 'CONFIRMED',
-    createdAt: '2024-02-02T11:00:00Z'
+    createdAt: '2025-12-20T10:00:00Z'
   },
   {
     id: 9,
-    platform: 'Hostelworld',
+    platform: 'Booking.com',
     guestName: 'Ivy Chen',
     guestEmail: 'ivy.c@email.com',
     roomNumber: 'A2',
-    beds: 1,
-    checkIn: '2024-02-15',
-    checkOut: '2024-02-18',
+    checkIn: '2026-01-20',
+    checkOut: '2026-01-24',
     status: 'CONFIRMED',
-    createdAt: '2024-02-02T12:00:00Z'
+    createdAt: '2025-12-21T11:00:00Z'
   },
-  // ========== ROOM B1: 5 beds occupied (FULL) ==========
   {
     id: 10,
-    platform: 'Booking.com',
+    platform: 'Agoda',
     guestName: 'Jack Anderson',
     guestEmail: 'jack.a@email.com',
-    roomNumber: 'B1',
-    beds: 1,
-    checkIn: '2024-02-15',
-    checkOut: '2024-02-18',
+    roomNumber: 'A2',
+    checkIn: '2026-01-26',
+    checkOut: '2026-01-30',
     status: 'CONFIRMED',
-    createdAt: '2024-02-03T08:00:00Z'
+    createdAt: '2025-12-22T12:00:00Z'
   },
+  
+  // ========== ROOM B1 (sequential, no overlap) ==========
   {
     id: 11,
-    platform: 'Agoda',
+    platform: 'Booking.com',
     guestName: 'Kate White',
     guestEmail: 'kate.w@email.com',
     roomNumber: 'B1',
-    beds: 1,
-    checkIn: '2024-02-15',
-    checkOut: '2024-02-18',
+    checkIn: '2026-01-01',
+    checkOut: '2026-01-04',
     status: 'CONFIRMED',
-    createdAt: '2024-02-03T09:00:00Z'
+    createdAt: '2025-12-15T08:00:00Z'
   },
   {
     id: 12,
-    platform: 'Hostelworld',
+    platform: 'Agoda',
     guestName: 'Leo Garcia',
     guestEmail: 'leo.g@email.com',
     roomNumber: 'B1',
-    beds: 1,
-    checkIn: '2024-02-15',
-    checkOut: '2024-02-18',
+    checkIn: '2026-01-05',
+    checkOut: '2026-01-09',
     status: 'CONFIRMED',
-    createdAt: '2024-02-03T10:00:00Z'
+    createdAt: '2025-12-16T09:00:00Z'
   },
   {
     id: 13,
@@ -196,389 +210,251 @@ const INITIAL_BOOKINGS = [
     guestName: 'Mia Robinson',
     guestEmail: 'mia.r@email.com',
     roomNumber: 'B1',
-    beds: 1,
-    checkIn: '2024-02-15',
-    checkOut: '2024-02-18',
+    checkIn: '2026-01-11',
+    checkOut: '2026-01-15',
     status: 'CONFIRMED',
-    createdAt: '2024-02-03T11:00:00Z'
+    createdAt: '2025-12-17T10:00:00Z'
   },
   {
     id: 14,
     platform: 'Agoda',
-    guestName: 'Noah Martinez',
-    guestEmail: 'noah.m@email.com',
+    guestName: 'Noah Brown',
+    guestEmail: 'noah.b@email.com',
     roomNumber: 'B1',
-    beds: 1,
-    checkIn: '2024-02-15',
-    checkOut: '2024-02-18',
+    checkIn: '2026-01-17',
+    checkOut: '2026-01-21',
     status: 'CONFIRMED',
-    createdAt: '2024-02-03T12:00:00Z'
+    createdAt: '2025-12-18T11:00:00Z'
   },
-  // ========== ROOM B2: 4 beds occupied (1 available) ==========
   {
     id: 15,
-    platform: 'Hostelworld',
+    platform: 'Booking.com',
     guestName: 'Olivia Thomas',
     guestEmail: 'olivia.t@email.com',
-    roomNumber: 'B2',
-    beds: 1,
-    checkIn: '2024-02-15',
-    checkOut: '2024-02-18',
+    roomNumber: 'B1',
+    checkIn: '2026-01-23',
+    checkOut: '2026-01-27',
     status: 'CONFIRMED',
-    createdAt: '2024-02-04T08:00:00Z'
+    createdAt: '2025-12-19T12:00:00Z'
   },
+  
+  // ========== ROOM B2 (sequential, no overlap) ==========
   {
     id: 16,
-    platform: 'Booking.com',
+    platform: 'Agoda',
     guestName: 'Paul Jackson',
     guestEmail: 'paul.j@email.com',
     roomNumber: 'B2',
-    beds: 1,
-    checkIn: '2024-02-15',
-    checkOut: '2024-02-18',
+    checkIn: '2026-01-02',
+    checkOut: '2026-01-06',
     status: 'CONFIRMED',
-    createdAt: '2024-02-04T09:00:00Z'
+    createdAt: '2025-12-14T08:00:00Z'
   },
   {
     id: 17,
-    platform: 'Agoda',
+    platform: 'Booking.com',
     guestName: 'Quinn Harris',
     guestEmail: 'quinn.h@email.com',
     roomNumber: 'B2',
-    beds: 1,
-    checkIn: '2024-02-15',
-    checkOut: '2024-02-18',
+    checkIn: '2026-01-07',
+    checkOut: '2026-01-11',
     status: 'CONFIRMED',
-    createdAt: '2024-02-04T10:00:00Z'
+    createdAt: '2025-12-15T09:00:00Z'
   },
   {
     id: 18,
-    platform: 'Hostelworld',
+    platform: 'Agoda',
     guestName: 'Rachel Clark',
     guestEmail: 'rachel.c@email.com',
     roomNumber: 'B2',
-    beds: 1,
-    checkIn: '2024-02-15',
-    checkOut: '2024-02-18',
+    checkIn: '2026-01-13',
+    checkOut: '2026-01-17',
     status: 'CONFIRMED',
-    createdAt: '2024-02-04T11:00:00Z'
+    createdAt: '2025-12-16T10:00:00Z'
   },
-
-  // ========== PENDING BOOKINGS ==========
-  // 4 people want to book, only 2 beds available
-  // 2 early bookings (can be approved) + 2 late bookings (will auto-reject)
-
-  // EARLY BOOKING 1: Room A1 (09:00:00) - CAN APPROVE (18 → 19)
   {
     id: 19,
     platform: 'Booking.com',
     guestName: 'Sam Turner',
     guestEmail: 'sam.t@email.com',
-    roomNumber: 'A1',
-    beds: 1,
-    checkIn: '2024-02-15',
-    checkOut: '2024-02-18',
-    status: 'PENDING',
-    createdAt: '2024-02-10T09:00:00Z' // EARLY - first in line
-  },
-  // EARLY BOOKING 2: Room B2 (09:01:00) - CAN APPROVE (19 → 20)
-  {
-    id: 20,
-    platform: 'Agoda',
-    guestName: 'Tina Moore',
-    guestEmail: 'tina.m@email.com',
     roomNumber: 'B2',
-    beds: 1,
-    checkIn: '2024-02-15',
-    checkOut: '2024-02-18',
-    status: 'PENDING',
-    createdAt: '2024-02-10T09:01:00Z' // EARLY - second in line
-  },
-  // LATE BOOKING 1: Room A1 (09:10:00) - WILL AUTO-REJECT (no capacity after first 2 approved)
-  {
-    id: 21,
-    platform: 'Hostelworld',
-    guestName: 'Uma Nelson',
-    guestEmail: 'uma.n@email.com',
-    roomNumber: 'A1', // Same room as Sam Turner
-    beds: 1,
-    checkIn: '2024-02-15',
-    checkOut: '2024-02-18',
-    status: 'PENDING',
-    createdAt: '2024-02-10T09:10:00Z' // LATE - booked after Sam
-  },
-  // LATE BOOKING 2: Room B2 (09:11:00) - WILL AUTO-REJECT (no capacity after first 2 approved)
-  {
-    id: 22,
-    platform: 'Booking.com',
-    guestName: 'Victor Adams',
-    guestEmail: 'victor.a@email.com',
-    roomNumber: 'B2', // Same room as Tina Moore
-    beds: 1,
-    checkIn: '2024-02-15',
-    checkOut: '2024-02-18',
-    status: 'PENDING',
-    createdAt: '2024-02-10T09:11:00Z' // LATE - booked after Tina
-  },
-  // LATE BOOKING 3: Room A2 (09:15:00) - WILL AUTO-REJECT
-  {
-    id: 23,
-    platform: 'Agoda',
-    guestName: 'Wendy Parker',
-    guestEmail: 'wendy.p@email.com',
-    roomNumber: 'A2', // Different room but no capacity
-    beds: 1,
-    checkIn: '2024-02-15',
-    checkOut: '2024-02-18',
-    status: 'PENDING',
-    createdAt: '2024-02-10T09:15:00Z' // LATE - booked even later
-  },
-  // LATE BOOKING 4: Room B1 (09:16:00) - WILL AUTO-REJECT
-  {
-    id: 24,
-    platform: 'Hostelworld',
-    guestName: 'Xavier Rodriguez',
-    guestEmail: 'xavier.r@email.com',
-    roomNumber: 'B1', // Different room but no capacity
-    beds: 1,
-    checkIn: '2024-02-15',
-    checkOut: '2024-02-18',
-    status: 'PENDING',
-    createdAt: '2024-02-10T09:16:00Z' // LATE - booked even later
+    checkIn: '2026-01-19',
+    checkOut: '2026-01-23',
+    status: 'CONFIRMED',
+    createdAt: '2025-12-17T11:00:00Z'
   }
 ]
 
-// Deep copy function for resetting bookings
-function deepCopyBookings(bookingsArray) {
-  return bookingsArray.map(b => ({ ...b }))
-}
-
-// Active bookings (starts as copy of initial state)
-let bookings = deepCopyBookings(INITIAL_BOOKINGS)
-
 // ============================================
-// HELPER FUNCTIONS
+// HELPER: Check if dates overlap for a room
 // ============================================
-
-// Calculate booked beds from confirmed bookings
-function calculateBookedBeds() {
-  return bookings
-    .filter(b => b.status === 'CONFIRMED')
-    .reduce((total, booking) => total + booking.beds, 0)
-}
-
-// Update available beds
-function updateAvailableBeds() {
-  propertyProfile.availableBeds = propertyProfile.totalBeds - calculateBookedBeds()
-}
-
-// Auto-reject ALL remaining pending bookings when property is fully booked
-function autoRejectFullyBookedBookings() {
-  updateAvailableBeds()
+function hasOverlap(roomNumber, checkIn, checkOut, excludeBookingId = null) {
+  const newStart = new Date(checkIn)
+  const newEnd = new Date(checkOut)
   
-  // Only auto-reject if property is truly fully booked (0 available beds)
-  if (propertyProfile.availableBeds > 0) {
-    return // Still have capacity, don't auto-reject anything
-  }
-  
-  // Property is fully booked - auto-reject ALL remaining pending bookings
-  const pendingBookings = bookings.filter(b => b.status === 'PENDING')
-  
-  pendingBookings.forEach(booking => {
-    booking.status = 'AUTO_REJECTED'
-    booking.autoRejectedReason = 'Informed: Property is fully booked'
+  return bookings.some(booking => {
+    if (booking.roomNumber !== roomNumber) return false
+    if (excludeBookingId && booking.id === excludeBookingId) return false
+    
+    const existingStart = new Date(booking.checkIn)
+    const existingEnd = new Date(booking.checkOut)
+    
+    // Overlap if new booking starts before existing ends AND new booking ends after existing starts
+    return newStart < existingEnd && newEnd > existingStart
   })
+}
+
+// Find available date slot for a room
+function findAvailableSlot(roomNumber) {
+  const roomBookings = bookings
+    .filter(b => b.roomNumber === roomNumber)
+    .sort((a, b) => new Date(a.checkIn) - new Date(b.checkIn))
   
-  if (pendingBookings.length > 0) {
-    console.log(`⚠️  Auto-rejected ${pendingBookings.length} pending bookings (property fully booked)`)
+  // Look for gaps between bookings in January 2026
+  const monthStart = new Date('2026-01-01')
+  const monthEnd = new Date('2026-01-31')
+  
+  let searchStart = monthStart
+  
+  for (const booking of roomBookings) {
+    const bookingStart = new Date(booking.checkIn)
+    const bookingEnd = new Date(booking.checkOut)
+    
+    // Check if there's a gap before this booking (at least 2 days)
+    const gapDays = Math.floor((bookingStart - searchStart) / (1000 * 60 * 60 * 24))
+    if (gapDays >= 2) {
+      const duration = Math.min(gapDays, 4) // Max 4 nights
+      const checkOut = new Date(searchStart)
+      checkOut.setDate(checkOut.getDate() + duration)
+      return {
+        checkIn: searchStart.toISOString().split('T')[0],
+        checkOut: checkOut.toISOString().split('T')[0]
+      }
+    }
+    
+    searchStart = bookingEnd
   }
+  
+  // Check gap after last booking
+  const gapDays = Math.floor((monthEnd - searchStart) / (1000 * 60 * 60 * 24))
+  if (gapDays >= 2) {
+    const duration = Math.min(gapDays, 4)
+    const checkOut = new Date(searchStart)
+    checkOut.setDate(checkOut.getDate() + duration)
+    return {
+      checkIn: searchStart.toISOString().split('T')[0],
+      checkOut: checkOut.toISOString().split('T')[0]
+    }
+  }
+  
+  return null // No available slot
 }
 
 // ============================================
 // API ENDPOINTS
 // ============================================
 
-// Get room occupancy summary
-app.get('/api/rooms/summary', (req, res) => {
-  const confirmedBookings = bookings.filter(b => b.status === 'CONFIRMED')
-  
-  // Build room summary
-  const roomSummary = ROOMS.map(roomNum => {
-    const roomBookings = confirmedBookings.filter(b => b.roomNumber === roomNum)
-    const occupiedBeds = roomBookings.length // Each booking is 1 bed
-    
-    // Create bed slots (5 per room)
-    const bedSlots = []
-    for (let i = 0; i < BEDS_PER_ROOM; i++) {
-      if (i < roomBookings.length) {
-        // Occupied bed
-        const booking = roomBookings[i]
-        bedSlots.push({
-          bedNumber: i + 1,
-          occupied: true,
-          guestName: booking.guestName,
-          guestEmail: booking.guestEmail,
-          platform: booking.platform,
-          checkIn: booking.checkIn,
-          checkOut: booking.checkOut,
-          createdAt: booking.createdAt
-        })
-      } else {
-        // Empty bed
-        bedSlots.push({
-          bedNumber: i + 1,
-          occupied: false
-        })
-      }
-    }
-    
-    return {
-      roomNumber: roomNum,
-      capacity: BEDS_PER_ROOM,
-      occupiedBeds: occupiedBeds,
-      bedSlots: bedSlots
-    }
-  })
-  
-  res.json(roomSummary)
-})
-
-// Get property owner profile
 app.get('/api/profile', (req, res) => {
-  updateAvailableBeds()
-  const bookedBeds = calculateBookedBeds()
-  res.json({
-    ...propertyProfile,
-    bookedBeds: bookedBeds
-  })
+  res.json(propertyProfile)
 })
 
-// Get all bookings (sorted by creation date - oldest first)
+app.get('/api/rooms', (req, res) => {
+  res.json(ROOMS.map(room => ({
+    roomNumber: room,
+    type: 'Private'
+  })))
+})
+
 app.get('/api/bookings', (req, res) => {
-  autoRejectFullyBookedBookings()
-  
-  const sortedBookings = [...bookings].sort((a, b) => {
-    return new Date(a.createdAt) - new Date(b.createdAt)
-  })
-  res.json(sortedBookings)
+  const bookingsWithColors = bookings.map(booking => ({
+    ...booking,
+    color: getBookingColor(booking.id)
+  }))
+  res.json(bookingsWithColors)
 })
 
-// Get a single booking by ID
+app.get('/api/bookings/room/:roomNumber', (req, res) => {
+  const roomBookings = bookings
+    .filter(b => b.roomNumber === req.params.roomNumber)
+    .map(booking => ({
+      ...booking,
+      color: getBookingColor(booking.id)
+    }))
+  res.json(roomBookings)
+})
+
 app.get('/api/bookings/:id', (req, res) => {
   const booking = bookings.find(b => b.id === parseInt(req.params.id))
   if (!booking) {
     return res.status(404).json({ error: 'Booking not found' })
   }
-  res.json(booking)
-})
-
-// Approve a booking
-app.post('/api/bookings/:id/approve', (req, res) => {
-  const booking = bookings.find(b => b.id === parseInt(req.params.id))
-  if (!booking) {
-    return res.status(404).json({ error: 'Booking not found' })
-  }
-
-  if (booking.status !== 'PENDING') {
-    return res.status(400).json({ error: 'Only pending bookings can be approved' })
-  }
-
-  // Check if there are enough beds available
-  updateAvailableBeds()
-  
-  if (propertyProfile.availableBeds < booking.beds) {
-    return res.status(400).json({ 
-      error: 'PROPERTY_FULLY_BOOKED',
-      message: 'Property fully booked',
-      currentBookedBeds: calculateBookedBeds(),
-      totalBeds: propertyProfile.totalBeds,
-      availableBeds: propertyProfile.availableBeds
-    })
-  }
-
-  // Approve the booking
-  booking.status = 'CONFIRMED'
-  
-  // Update available beds and auto-reject others if needed
-  updateAvailableBeds()
-  autoRejectFullyBookedBookings()
-  
-  const bookedBeds = calculateBookedBeds()
-  
-  res.json({ 
-    message: 'Booking approved',
-    booking: booking,
-    availableBeds: propertyProfile.availableBeds,
-    bookedBeds: bookedBeds
+  res.json({
+    ...booking,
+    color: getBookingColor(booking.id)
   })
 })
 
-// Reject a booking
-app.post('/api/bookings/:id/reject', (req, res) => {
-  const booking = bookings.find(b => b.id === parseInt(req.params.id))
-  if (!booking) {
-    return res.status(404).json({ error: 'Booking not found' })
-  }
+// ============================================
+// DEMO ENDPOINTS
+// ============================================
 
-  if (booking.status !== 'PENDING') {
-    return res.status(400).json({ error: 'Only pending bookings can be rejected' })
-  }
-
-  booking.status = 'REJECTED'
+// Generate a random booking (finds available slot)
+app.post('/api/demo/random-booking', (req, res) => {
+  // Try each room until we find one with availability
+  const shuffledRooms = [...ROOMS].sort(() => Math.random() - 0.5)
   
-  res.json({ 
-    message: 'Booking rejected',
-    booking: booking,
-    availableBeds: propertyProfile.availableBeds
-  })
+  for (const roomNumber of shuffledRooms) {
+    const slot = findAvailableSlot(roomNumber)
+    if (slot) {
+      const guestName = generateGuestName()
+      const newBooking = {
+        id: nextBookingId++,
+        platform: PLATFORMS[Math.floor(Math.random() * PLATFORMS.length)],
+        guestName,
+        guestEmail: generateEmail(guestName),
+        roomNumber,
+        checkIn: slot.checkIn,
+        checkOut: slot.checkOut,
+        status: 'CONFIRMED',
+        createdAt: new Date().toISOString()
+      }
+      
+      bookings.push(newBooking)
+      console.log(`📥 New booking: ${newBooking.guestName} in Room ${roomNumber} (${slot.checkIn} → ${slot.checkOut})`)
+      
+      return res.status(201).json({
+        ...newBooking,
+        color: getBookingColor(newBooking.id)
+      })
+    }
+  }
+  
+  res.status(409).json({ error: 'No available slots' })
 })
 
-// Cancel a booking (restore beds)
-app.post('/api/bookings/:id/cancel', (req, res) => {
-  const booking = bookings.find(b => b.id === parseInt(req.params.id))
-  if (!booking) {
-    return res.status(404).json({ error: 'Booking not found' })
+// Cancel a random booking
+app.post('/api/demo/random-cancel', (req, res) => {
+  if (bookings.length === 0) {
+    return res.status(404).json({ error: 'No bookings to cancel' })
   }
-
-  if (booking.status === 'CANCELLED') {
-    return res.status(400).json({ error: 'Booking already cancelled' })
-  }
-
-  booking.status = 'CANCELLED'
-  updateAvailableBeds()
   
-  res.json({ 
-    message: 'Booking cancelled',
-    booking: booking,
-    availableBeds: propertyProfile.availableBeds,
-    bookedBeds: calculateBookedBeds()
-  })
-})
-
-// Reset demo to initial state
-app.post('/api/reset', (req, res) => {
-  // Reset bookings to initial state
-  bookings = deepCopyBookings(INITIAL_BOOKINGS)
-  updateAvailableBeds()
+  const randomIndex = Math.floor(Math.random() * bookings.length)
+  const cancelledBooking = bookings.splice(randomIndex, 1)[0]
   
-  console.log('🔄 Demo reset to initial state')
-  console.log(`🛏️  Total beds: ${propertyProfile.totalBeds}, Occupied: ${calculateBookedBeds()}, Available: ${propertyProfile.availableBeds}`)
+  console.log(`❌ Cancelled: ${cancelledBooking.guestName} in Room ${cancelledBooking.roomNumber}`)
   
   res.json({
-    message: 'Demo reset successfully',
-    totalBeds: propertyProfile.totalBeds,
-    bookedBeds: calculateBookedBeds(),
-    availableBeds: propertyProfile.availableBeds,
-    pendingBookings: bookings.filter(b => b.status === 'PENDING').length
+    message: 'Booking cancelled',
+    booking: {
+      ...cancelledBooking,
+      color: getBookingColor(cancelledBooking.id)
+    }
   })
 })
-
-// Initialize available beds on startup
-updateAvailableBeds()
 
 // Start the server
 app.listen(PORT, '127.0.0.1', () => {
   console.log(`🚀 Backend server running at http://127.0.0.1:${PORT}`)
-  console.log(`📊 Initialized with ${bookings.length} bookings`)
-  console.log(`🛏️  Total beds: ${propertyProfile.totalBeds}, Occupied: ${calculateBookedBeds()}, Available: ${propertyProfile.availableBeds}`)
+  console.log(`📊 Loaded ${bookings.length} confirmed bookings`)
+  console.log(`🏠 Rooms: ${ROOMS.join(', ')} (Private rooms - no overlapping bookings)`)
 })
