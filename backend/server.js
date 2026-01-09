@@ -304,46 +304,58 @@ function hasOverlap(roomNumber, checkIn, checkOut, excludeBookingId = null) {
   })
 }
 
-// Find available date slot for a room
+// Find available date slot for a room (no overlap allowed)
 function findAvailableSlot(roomNumber) {
   const roomBookings = bookings
     .filter(b => b.roomNumber === roomNumber)
     .sort((a, b) => new Date(a.checkIn) - new Date(b.checkIn))
   
-  // Look for gaps between bookings in January 2026
-  const monthStart = new Date('2026-01-01')
-  const monthEnd = new Date('2026-01-31')
-  
-  let searchStart = monthStart
-  
-  for (const booking of roomBookings) {
-    const bookingStart = new Date(booking.checkIn)
-    const bookingEnd = new Date(booking.checkOut)
-    
-    // Check if there's a gap before this booking (at least 2 days)
-    const gapDays = Math.floor((bookingStart - searchStart) / (1000 * 60 * 60 * 24))
-    if (gapDays >= 2) {
-      const duration = Math.min(gapDays, 4) // Max 4 nights
-      const checkOut = new Date(searchStart)
-      checkOut.setDate(checkOut.getDate() + duration)
-      return {
-        checkIn: searchStart.toISOString().split('T')[0],
-        checkOut: checkOut.toISOString().split('T')[0]
-      }
-    }
-    
-    searchStart = bookingEnd
+  // If no bookings for this room, use full month
+  if (roomBookings.length === 0) {
+    return { checkIn: '2026-01-10', checkOut: '2026-01-14' }
   }
   
-  // Check gap after last booking
-  const gapDays = Math.floor((monthEnd - searchStart) / (1000 * 60 * 60 * 24))
-  if (gapDays >= 2) {
-    const duration = Math.min(gapDays, 4)
-    const checkOut = new Date(searchStart)
-    checkOut.setDate(checkOut.getDate() + duration)
+  // Look for gaps between bookings (need at least 3 days for a 2-night stay)
+  for (let i = 0; i < roomBookings.length - 1; i++) {
+    const currentEnd = new Date(roomBookings[i].checkOut)
+    const nextStart = new Date(roomBookings[i + 1].checkIn)
+    
+    // Gap in days between checkout and next checkin
+    const gapDays = Math.floor((nextStart - currentEnd) / (1000 * 60 * 60 * 24))
+    
+    // Need at least 3 days gap for a proper 2-night booking
+    if (gapDays >= 3) {
+      const checkInDate = new Date(currentEnd)
+      checkInDate.setDate(checkInDate.getDate() + 1) // Start day after checkout
+      
+      const nights = Math.min(gapDays - 1, 3) // Leave 1 day buffer, max 3 nights
+      const checkOutDate = new Date(checkInDate)
+      checkOutDate.setDate(checkOutDate.getDate() + nights)
+      
+      return {
+        checkIn: checkInDate.toISOString().split('T')[0],
+        checkOut: checkOutDate.toISOString().split('T')[0]
+      }
+    }
+  }
+  
+  // Check gap after last booking (until end of January)
+  const lastBooking = roomBookings[roomBookings.length - 1]
+  const lastEnd = new Date(lastBooking.checkOut)
+  const monthEnd = new Date('2026-01-31')
+  const gapDays = Math.floor((monthEnd - lastEnd) / (1000 * 60 * 60 * 24))
+  
+  if (gapDays >= 3) {
+    const checkInDate = new Date(lastEnd)
+    checkInDate.setDate(checkInDate.getDate() + 1)
+    
+    const nights = Math.min(gapDays - 1, 3)
+    const checkOutDate = new Date(checkInDate)
+    checkOutDate.setDate(checkOutDate.getDate() + nights)
+    
     return {
-      checkIn: searchStart.toISOString().split('T')[0],
-      checkOut: checkOut.toISOString().split('T')[0]
+      checkIn: checkInDate.toISOString().split('T')[0],
+      checkOut: checkOutDate.toISOString().split('T')[0]
     }
   }
   
@@ -406,6 +418,12 @@ app.post('/api/demo/random-booking', (req, res) => {
   for (const roomNumber of shuffledRooms) {
     const slot = findAvailableSlot(roomNumber)
     if (slot) {
+      // Double-check no overlap before adding
+      if (hasOverlap(roomNumber, slot.checkIn, slot.checkOut)) {
+        console.log(`⚠️ Slot ${slot.checkIn} → ${slot.checkOut} in ${roomNumber} has overlap, skipping`)
+        continue
+      }
+      
       const guestName = generateGuestName()
       const newBooking = {
         id: nextBookingId++,
