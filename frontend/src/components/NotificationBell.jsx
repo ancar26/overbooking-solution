@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import '../styles/NotificationBell.css'
 
-function NotificationBell({ notifications, onClear }) {
+function NotificationBell({ notifications, onClear, onMarkAllRead }) {
   const [isOpen, setIsOpen] = useState(false)
   const bellRef = useRef(null)
 
@@ -19,7 +19,12 @@ function NotificationBell({ notifications, onClear }) {
   }, [])
 
   const toggleOpen = () => {
+    const wasOpen = isOpen
     setIsOpen(!isOpen)
+    // Mark all as read when opening the dropdown
+    if (!wasOpen && unreadCount > 0 && onMarkAllRead) {
+      setTimeout(() => onMarkAllRead(), 500)
+    }
   }
 
   const formatTime = (date) => {

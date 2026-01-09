@@ -3,12 +3,12 @@ import BookingCalendar from '../components/BookingCalendar'
 import NotificationBell from '../components/NotificationBell'
 import { 
   requestNotificationPermission, 
-  showNewBookingNotification,
-  showCancellationNotification
+  showNewBookingNotification
 } from '../utils/notifications'
 import '../styles/Pages.css'
 
 const API_URL = '/api'
+const NOTIF_STORAGE_KEY = 'booking-calendar-notifications'
 
 function BookingsStatus() {
   const [bookings, setBookings] = useState([])
@@ -17,6 +17,7 @@ function BookingsStatus() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [toast, setToast] = useState(null)
+  // Seed with previous notifications (unread so badge shows history)
   const [notifications, setNotifications] = useState([])
   const demoTriggeredRef = useRef(false)
 
@@ -72,17 +73,61 @@ function BookingsStatus() {
     setNotifications([])
   }
 
+  // Mark all notifications as read
+  const markAllRead = () => {
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })))
+  }
+
+  // Persist notifications
+  useEffect(() => {
+    // Load from storage on mount
+    const saved = localStorage.getItem(NOTIF_STORAGE_KEY)
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved)
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setNotifications(parsed)
+          return
+        }
+      } catch (err) {
+        console.warn('Failed to parse stored notifications', err)
+      }
+    }
+    // Seed defaults if none stored
+    const seeded = [
+      {
+        type: 'new',
+        booking: { guestName: 'Maria Garcia', roomNumber: 'A2', checkIn: '2026-01-15', checkOut: '2026-01-18', platform: 'Booking.com' },
+        timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+        read: false
+      },
+      {
+        type: 'cancel',
+        booking: { guestName: 'John Smith', roomNumber: 'B1', checkIn: '2026-01-20', checkOut: '2026-01-23', platform: 'Agoda' },
+        timestamp: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
+        read: false
+      }
+    ]
+    setNotifications(seeded)
+  }, [])
+
+  // Save to storage whenever notifications change
+  useEffect(() => {
+    localStorage.setItem(NOTIF_STORAGE_KEY, JSON.stringify(notifications))
+  }, [notifications])
+
   // Demo: trigger notifications after page visit
   useEffect(() => {
+    // Only trigger once per page load
     if (demoTriggeredRef.current) return
     demoTriggeredRef.current = true
 
-    console.log('📱 Demo mode initialized - notifications will appear in 5 seconds')
+    console.log('📱 Demo mode - new booking notification in 10 seconds...')
     
     // Request notification permission on load
     requestNotificationPermission()
 
-    // After 5 seconds, create a new booking notification
+    // After 10 seconds, create a new booking notification
     const newBookingTimer = setTimeout(async () => {
       console.log('🔔 Triggering new booking demo...')
       try {
@@ -110,41 +155,11 @@ function BookingsStatus() {
       } catch (err) {
         console.error('Demo booking error:', err)
       }
-    }, 5000) // 5 seconds
-
-    // After 10 seconds, cancel a booking
-    const cancelTimer = setTimeout(async () => {
-      console.log('🔔 Triggering cancellation demo...')
-      try {
-        const response = await fetch(`${API_URL}/demo/random-cancel`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' }
-        })
-        
-        if (response.ok) {
-          const data = await response.json()
-          console.log('❌ Booking cancelled:', data.booking.guestName)
-          
-          // Always show in-app notifications
-          showToast('cancel', data.booking)
-          addNotification('cancel', data.booking)
-          fetchData(false)
-          
-          // Try push notification (may fail in some browsers)
-          try {
-            showCancellationNotification(data.booking)
-          } catch {
-            console.log('Push notification not available')
-          }
-        }
-      } catch (err) {
-        console.error('Demo cancel error:', err)
-      }
     }, 10000) // 10 seconds
 
     return () => {
       clearTimeout(newBookingTimer)
-      clearTimeout(cancelTimer)
+      clearTimeout(newBookingTimer)
     }
   }, [fetchData])
 
@@ -186,6 +201,7 @@ function BookingsStatus() {
         <NotificationBell 
           notifications={notifications} 
           onClear={clearNotifications}
+          onMarkAllRead={markAllRead}
         />
       </div>
       
