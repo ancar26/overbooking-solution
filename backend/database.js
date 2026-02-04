@@ -330,7 +330,10 @@ export const bookingQueries = {
     SELECT * FROM bookings 
     WHERE user_id = ?
     AND room_number = ? 
-    AND date(check_in) < date(?) 
+    -- Checkout/checkin same day is allowed.
+    -- Overlap for [check_in, check_out) intervals:
+    -- existing.check_in < new.check_out AND existing.check_out > new.check_in
+    AND date(check_in) < date(?)
     AND date(check_out) > date(?)
   `),
   getOverlappingExcludingId: db.prepare(`

@@ -50,6 +50,35 @@ function safeJsonParse(value, fallback) {
   }
 }
 
+function normalizeISODate(value) {
+  // Expect YYYY-MM-DD, keep as pure date (no timezone conversion).
+  if (!value || typeof value !== 'string') return null
+  const m = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!m) return null
+  const year = Number(m[1])
+  const month = Number(m[2])
+  const day = Number(m[3])
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null
+  // Basic range validation (Date.UTC will normalize otherwise).
+  if (month < 1 || month > 12) return null
+  if (day < 1 || day > 31) return null
+  return `${m[1]}-${m[2]}-${m[3]}`
+}
+
+function addDaysISO_UTC(isoDate, daysToAdd) {
+  // Add days in UTC to avoid DST/timezone shifts.
+  const m = isoDate.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  const year = Number(m[1])
+  const month = Number(m[2])
+  const day = Number(m[3])
+  const dt = new Date(Date.UTC(year, month - 1, day))
+  dt.setUTCDate(dt.getUTCDate() + daysToAdd)
+  const y = String(dt.getUTCFullYear()).padStart(4, '0')
+  const mo = String(dt.getUTCMonth() + 1).padStart(2, '0')
+  const d = String(dt.getUTCDate()).padStart(2, '0')
+  return `${y}-${mo}-${d}`
+}
+
 function getTokenFromRequest(req) {
   const authHeader = req.headers.authorization
   if (authHeader && typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
@@ -416,27 +445,18 @@ app.post('/api/manual-guests', requireAuth, (req, res) => {
 // Assumption: clicking an empty cell creates a one-night stay for that date (date -> next day).
 app.post('/api/bookings/cell', requireAuth, (req, res) => {
   const { roomNumber, date, checkIn: checkInRaw, checkOut: checkOutRaw, guest } = req.body || {}
-  const checkIn = checkInRaw || date
-  const checkOut = checkOutRaw
+  const checkIn = normalizeISODate(checkInRaw || date)
+  const checkOut = checkOutRaw ? normalizeISODate(checkOutRaw) : null
   if (!roomNumber || !checkIn) return res.status(400).json({ error: 'Missing roomNumber or checkIn' })
+  if (checkOutRaw && !checkOut) return res.status(400).json({ error: 'Invalid checkOut' })
 
   const fullName = (guest?.fullName || '').trim()
   const email = (guest?.email || '').trim().toLowerCase()
   if (!email) return res.status(400).json({ error: 'Email is required' })
 
-  // Default: 1-night stay (checkIn -> next day), unless checkOut is provided.
-  const start = new Date(checkIn + 'T00:00:00')
-  if (Number.isNaN(start.getTime())) return res.status(400).json({ error: 'Invalid date' })
-  let end = null
-  if (checkOut) {
-    end = new Date(checkOut + 'T00:00:00')
-    if (Number.isNaN(end.getTime())) return res.status(400).json({ error: 'Invalid checkOut' })
-  } else {
-    end = new Date(start)
-    end.setDate(end.getDate() + 1)
-  }
-  const finalCheckIn = start.toISOString().slice(0, 10)
-  const finalCheckOut = end.toISOString().slice(0, 10)
+  // Default: 1-night booking (checkIn -> next day), unless checkOut is provided.
+  const finalCheckIn = checkIn
+  const finalCheckOut = checkOut || addDaysISO_UTC(checkIn, 1)
   if (finalCheckOut <= finalCheckIn) return res.status(400).json({ error: 'Check-out must be after check-in' })
 
   const overlapping = bookingQueries.getOverlapping.all(req.user.id, roomNumber, finalCheckOut, finalCheckIn)
@@ -477,8 +497,8 @@ app.patch('/api/bookings/:id/guest', requireAuth, (req, res) => {
   const email = String(nextGuest.email || '').trim().toLowerCase()
   if (!email) return res.status(400).json({ error: 'Email is required' })
 
-  const nextCheckIn = String(stay.checkIn || row.check_in).trim()
-  const nextCheckOut = String(stay.checkOut || row.check_out).trim()
+  const nextCheckIn = normalizeISODate(stay.checkIn || row.check_in)
+  const nextCheckOut = normalizeISODate(stay.checkOut || row.check_out)
   if (!nextCheckIn || !nextCheckOut) return res.status(400).json({ error: 'Missing check-in/check-out' })
   if (nextCheckOut <= nextCheckIn) return res.status(400).json({ error: 'Check-out must be after check-in' })
 

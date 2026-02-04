@@ -138,8 +138,46 @@ function OwnerProfile() {
               </div>
             </div>
             <p className="sources-note" style={{ marginTop: 16 }}>
-              Counts are derived from manual bookings for {todayISO}.
+              Summary is derived from manual bookings for {todayISO}.
             </p>
+
+            <div className="sources-list" style={{ marginTop: 16 }}>
+              <div className="source-item">
+                <span className="source-name">Check-ins today</span>
+                <span className="source-count">{todays.checkIns.length}</span>
+              </div>
+              {todays.checkIns.length === 0 ? (
+                <p className="sources-note" style={{ margin: 0 }}>
+                  No check-ins today.
+                </p>
+              ) : (
+                todays.checkIns.map(b => (
+                  <div key={b.id} className="source-item">
+                    <span className="source-name">{b.guestName || b.guest?.fullName || 'Guest'}</span>
+                    <span className="source-count">Room {b.roomNumber}</span>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="sources-list" style={{ marginTop: 16 }}>
+              <div className="source-item">
+                <span className="source-name">Check-outs today</span>
+                <span className="source-count">{todays.checkOuts.length}</span>
+              </div>
+              {todays.checkOuts.length === 0 ? (
+                <p className="sources-note" style={{ margin: 0 }}>
+                  No check-outs today.
+                </p>
+              ) : (
+                todays.checkOuts.map(b => (
+                  <div key={b.id} className="source-item">
+                    <span className="source-name">{b.guestName || b.guest?.fullName || 'Guest'}</span>
+                    <span className="source-count">Room {b.roomNumber}</span>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
 
           {/* Property Stats */}
