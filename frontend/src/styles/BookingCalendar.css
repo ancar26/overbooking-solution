@@ -72,15 +72,17 @@
 
 /* Calendar Container - Scrollable */
 .calendar-container {
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: auto;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
   scrollbar-color: #3d4660 #1a1f2e;
+  /* Enable vertical scrolling for many rows without changing layout */
+  max-height: 70vh;
 }
 
 .calendar-container::-webkit-scrollbar {
   height: 8px;
+  width: 8px;
 }
 
 .calendar-container::-webkit-scrollbar-track {
@@ -107,6 +109,17 @@
 .calendar-row {
   display: flex;
   border-bottom: 1px solid #2d3548;
+}
+
+/* Keep day header aligned while scrolling */
+.header-row {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.header-row .room-label-cell {
+  z-index: 30; /* sticky top + sticky left intersection */
 }
 
 .calendar-row:last-child {
@@ -222,6 +235,7 @@
   height: 100%;
   border-right: 1px solid #2d3548;
   background: #1a1f2e;
+  position: relative;
 }
 
 .day-slot:last-child {
@@ -282,6 +296,56 @@
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
+/* Cell action (+) button */
+.cell-add-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  border: 1px solid rgba(139, 149, 168, 0.35);
+  background: rgba(37, 43, 61, 0.65);
+  color: #cbd5e1;
+  font-size: 14px;
+  line-height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.day-slot:hover .cell-add-btn {
+  opacity: 1;
+  transform: translateY(-1px);
+}
+
+/* Touch devices: show the icon without requiring hover */
+@media (hover: none) {
+  .cell-add-btn {
+    opacity: 0.9;
+  }
+
+  /* Disable hover-lift effects on touch to prevent accidental jitter */
+  .booking-block:hover {
+    transform: none;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    z-index: 5;
+  }
+
+  .nav-btn:hover {
+    background: #2d3548;
+    color: #8b95a8;
+  }
+
+  .today-btn:hover {
+    transform: none;
+    box-shadow: none;
+  }
+}
+
 .booking-platform {
   color: rgba(255, 255, 255, 0.75);
   font-size: 10px;
@@ -315,6 +379,10 @@
   box-shadow: 0 24px 48px rgba(0, 0, 0, 0.4);
   overflow: hidden;
   animation: popupSlideIn 0.25s ease-out;
+}
+
+.booking-popup.guest-modal {
+  max-width: 340px;
 }
 
 @keyframes popupSlideIn {
@@ -414,18 +482,27 @@
     gap: 12px;
   }
 
+  .nav-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    font-size: 16px;
+  }
+
   .calendar-nav {
     width: 100%;
     justify-content: space-between;
   }
 
   .calendar-title {
-    font-size: 18px;
+    font-size: 16px;
     min-width: auto;
   }
 
   .today-btn {
     width: 100%;
+    padding: 8px 14px;
+    font-size: 13px;
   }
 
   .room-label-cell {
@@ -435,7 +512,7 @@
   }
 
   .room-name {
-    font-size: 14px;
+    font-size: 13px;
   }
 
   .room-capacity {
@@ -463,6 +540,15 @@
     font-size: 9px;
   }
 
+  .cell-add-btn {
+    top: 4px;
+    right: 4px;
+    width: 16px;
+    height: 16px;
+    border-radius: 5px;
+    font-size: 12px;
+  }
+
   .booking-block {
     padding: 4px 6px;
     top: 6px;
@@ -471,10 +557,10 @@
   }
 
   .booking-guest {
-    font-size: 11px;
+    font-size: 10px;
   }
 
-  .booking-beds {
+  .booking-platform {
     font-size: 9px;
   }
 
@@ -482,6 +568,12 @@
     max-width: 100%;
     margin: 0 10px;
     border-radius: 12px;
+  }
+
+  .popup-close {
+    width: 28px;
+    height: 28px;
+    font-size: 18px;
   }
 
   .popup-header {
@@ -522,6 +614,13 @@
   .day-slot {
     width: 44px;
     min-width: 44px;
+  }
+
+  .cell-add-btn {
+    width: 14px;
+    height: 14px;
+    font-size: 11px;
+    border-radius: 5px;
   }
 }
 

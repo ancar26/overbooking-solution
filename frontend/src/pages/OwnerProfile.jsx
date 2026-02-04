@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useMemo, useState, useEffect, useCallback } from 'react'
 import '../styles/Pages.css'
 import { apiFetch } from '../utils/api'
 
@@ -10,11 +10,7 @@ function OwnerProfile() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
-  useEffect(() => {
-    fetchData()
-  }, [])
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       const [profileRes, bookingsRes] = await Promise.all([
         apiFetch(`${API_URL}/profile`),
@@ -45,7 +41,33 @@ function OwnerProfile() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
+
+  useEffect(() => {
+    fetchData()
+  }, [fetchData])
+
+  useEffect(() => {
+    const listener = () => fetchData()
+    window.addEventListener('booking-changed', listener)
+    return () => window.removeEventListener('booking-changed', listener)
+  }, [fetchData])
+
+  const todayISO = useMemo(() => {
+    const now = new Date()
+    const y = now.getFullYear()
+    const m = String(now.getMonth() + 1).padStart(2, '0')
+    const d = String(now.getDate()).padStart(2, '0')
+    return `${y}-${m}-${d}`
+  }, [])
+
+  const todays = useMemo(() => {
+    // Requirement: derived from manually inserted bookings.
+    const manual = bookings.filter(b => b.platform === 'Manual')
+    const checkIns = manual.filter(b => b.checkIn === todayISO)
+    const checkOuts = manual.filter(b => b.checkOut === todayISO)
+    return { manual, checkIns, checkOuts }
+  }, [bookings, todayISO])
 
   // Get unique platforms from bookings
   const getPlatforms = () => {
@@ -98,10 +120,28 @@ function OwnerProfile() {
       <div className="profile-container">
         <header className="profile-header">
           <h1>{profile.propertyName}</h1>
-          <p className="profile-subtitle">Property Overview</p>
+          <p className="profile-subtitle">Dashboard</p>
         </header>
 
         <div className="profile-grid">
+          {/* Today's Live Status */}
+          <div className="profile-card stats-card">
+            <h3>Today</h3>
+            <div className="stats-grid stats-grid-2">
+              <div className="stat-item">
+                <span className="stat-value">{todays.checkIns.length}</span>
+                <span className="stat-label">Check-ins</span>
+              </div>
+              <div className="stat-item">
+                <span className="stat-value">{todays.checkOuts.length}</span>
+                <span className="stat-label">Check-outs</span>
+              </div>
+            </div>
+            <p className="sources-note" style={{ marginTop: 16 }}>
+              Counts are derived from manual bookings for {todayISO}.
+            </p>
+          </div>
+
           {/* Property Stats */}
           <div className="profile-card stats-card">
             <h3>Property Statistics</h3>
@@ -144,7 +184,7 @@ function OwnerProfile() {
               ))}
             </div>
             <p className="sources-note">
-              Bookings are synced from external platforms. Conflicts are automatically prevented.
+              Bookings will be synced from external platforms. Conflicts will be automatically prevented.
             </p>
           </div>
         </div>

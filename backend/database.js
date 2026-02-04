@@ -53,6 +53,7 @@ db.exec(`
     platform TEXT NOT NULL,
     guest_name TEXT NOT NULL,
     guest_email TEXT NOT NULL,
+    guest_data_json TEXT DEFAULT '{}',
     room_number TEXT NOT NULL,
     check_in TEXT NOT NULL,
     check_out TEXT NOT NULL,
@@ -186,6 +187,30 @@ if (!tableHasColumn('bookings', 'user_id')) {
   }
 }
 
+// Flexible guest data (JSON) for future extension.
+try {
+  addColumnIfMissing('bookings', 'guest_data_json', "TEXT DEFAULT '{}'")
+  // Best-effort backfill: if JSON is empty, copy from guest_name/guest_email.
+  const rows = db
+    .prepare("SELECT id, guest_name, guest_email, guest_data_json FROM bookings WHERE guest_data_json IS NULL OR guest_data_json = '' OR guest_data_json = '{}'")
+    .all()
+  if (rows.length > 0) {
+    const update = db.prepare('UPDATE bookings SET guest_data_json = ? WHERE id = ?')
+    db.exec('BEGIN')
+    try {
+      for (const r of rows) {
+        update.run(JSON.stringify({ fullName: r.guest_name, email: r.guest_email }), r.id)
+      }
+      db.exec('COMMIT')
+    } catch (err) {
+      db.exec('ROLLBACK')
+      console.warn('⚠️ Failed to backfill guest_data_json:', err)
+    }
+  }
+} catch (err) {
+  console.warn('⚠️ Failed to migrate guest_data_json:', err)
+}
+
 try {
   if (tableHasColumn('property_data', 'user_id')) {
     db.exec(`CREATE INDEX IF NOT EXISTS idx_property_data_user_id ON property_data(user_id)`)
@@ -287,8 +312,18 @@ export const bookingQueries = {
   getByRoomByUserId: db.prepare('SELECT * FROM bookings WHERE user_id = ? AND room_number = ? ORDER BY check_in ASC'),
   getByIdByUserId: db.prepare('SELECT * FROM bookings WHERE user_id = ? AND id = ?'),
   create: db.prepare(`
-    INSERT INTO bookings (user_id, platform, guest_name, guest_email, room_number, check_in, check_out, sex, bed, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO bookings (user_id, platform, guest_name, guest_email, guest_data_json, room_number, check_in, check_out, sex, bed, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `),
+  updateGuestByUserId: db.prepare(`
+    UPDATE bookings
+    SET guest_name = ?, guest_email = ?, guest_data_json = ?
+    WHERE user_id = ? AND id = ?
+  `),
+  updateDatesAndGuestByUserId: db.prepare(`
+    UPDATE bookings
+    SET check_in = ?, check_out = ?, guest_name = ?, guest_email = ?, guest_data_json = ?
+    WHERE user_id = ? AND id = ?
   `),
   deleteByUserId: db.prepare('DELETE FROM bookings WHERE user_id = ? AND id = ?'),
   getOverlapping: db.prepare(`
@@ -296,6 +331,14 @@ export const bookingQueries = {
     WHERE user_id = ?
     AND room_number = ? 
     AND date(check_in) < date(?) 
+    AND date(check_out) > date(?)
+  `),
+  getOverlappingExcludingId: db.prepare(`
+    SELECT * FROM bookings
+    WHERE user_id = ?
+    AND room_number = ?
+    AND id != ?
+    AND date(check_in) < date(?)
     AND date(check_out) > date(?)
   `)
 }
