@@ -44,7 +44,7 @@ function Navigation({ isAuthenticated, user: userProp, onLogout }) {
                     to="/" 
                     className={location.pathname === '/' ? 'nav-link active' : 'nav-link'}
                   >
-                    Property Info
+                    Dashboard
                   </Link>
                   <Link 
                     to="/bookings" 

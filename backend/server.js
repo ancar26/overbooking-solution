@@ -163,11 +163,28 @@ function buildRoomsFromProperty(propertyRow) {
 
 // Convert DB row to booking format
 function formatBooking(row) {
+  const guestData = safeJsonParse(row.guest_data_json, {})
+  const guest = {
+    // Keep names consistent for frontend modal
+    fullName: guestData.fullName ?? row.guest_name,
+    email: guestData.email ?? row.guest_email,
+    phone: guestData.phone ?? '',
+    gender: guestData.gender ?? guestData.sex ?? row.sex ?? ''
+  }
+  // Preserve any extra fields for future extension
+  const extra = { ...guestData }
+  delete extra.fullName
+  delete extra.email
+  delete extra.phone
+  delete extra.gender
+  delete extra.sex
+
   return {
     id: row.id,
     platform: row.platform,
-    guestName: row.guest_name,
-    guestEmail: row.guest_email,
+    guestName: guest.fullName,
+    guestEmail: guest.email,
+    guest: { ...guest, ...extra },
     roomNumber: row.room_number,
     checkIn: row.check_in,
     checkOut: row.check_out,
@@ -322,7 +339,7 @@ app.get('/api/bookings/:id', requireAuth, (req, res) => {
 
 // Add manual guest
 app.post('/api/manual-guests', requireAuth, (req, res) => {
-  const { name, sex, room, bed, checkIn, checkOut } = req.body
+  const { name, sex, room, bed, checkIn, checkOut, email, phone, gender } = req.body
   
   console.log(`📝 Adding manual guest: ${name}, Room: ${room}, Dates: ${checkIn} → ${checkOut}, Bed: ${bed}`)
   
@@ -356,7 +373,13 @@ app.post('/api/manual-guests', requireAuth, (req, res) => {
     req.user.id,
     'Manual',
     name,
-    `${name.toLowerCase().replace(/\s+/g, '.')}@manual.local`,
+    ((email || `${name.toLowerCase().replace(/\s+/g, '.')}@manual.local`) || '').toLowerCase(),
+    JSON.stringify({
+      fullName: name,
+      email: ((email || '') || '').toLowerCase(),
+      phone: phone || '',
+      gender: gender || sex || ''
+    }),
     roomKey,
     checkIn,
     checkOut,
@@ -387,6 +410,102 @@ app.post('/api/manual-guests', requireAuth, (req, res) => {
   console.log(`✅ Manual guest added: ${newBooking.guest_name} in ${newBooking.room_number} (${newBooking.check_in} → ${newBooking.check_out})`)
   
   res.status(201).json({ guest: formatBooking(newBooking) })
+})
+
+// Create a 1-night booking from a specific calendar cell.
+// Assumption: clicking an empty cell creates a one-night stay for that date (date -> next day).
+app.post('/api/bookings/cell', requireAuth, (req, res) => {
+  const { roomNumber, date, checkIn: checkInRaw, checkOut: checkOutRaw, guest } = req.body || {}
+  const checkIn = checkInRaw || date
+  const checkOut = checkOutRaw
+  if (!roomNumber || !checkIn) return res.status(400).json({ error: 'Missing roomNumber or checkIn' })
+
+  const fullName = (guest?.fullName || '').trim()
+  const email = (guest?.email || '').trim().toLowerCase()
+  if (!email) return res.status(400).json({ error: 'Email is required' })
+
+  // Default: 1-night stay (checkIn -> next day), unless checkOut is provided.
+  const start = new Date(checkIn + 'T00:00:00')
+  if (Number.isNaN(start.getTime())) return res.status(400).json({ error: 'Invalid date' })
+  let end = null
+  if (checkOut) {
+    end = new Date(checkOut + 'T00:00:00')
+    if (Number.isNaN(end.getTime())) return res.status(400).json({ error: 'Invalid checkOut' })
+  } else {
+    end = new Date(start)
+    end.setDate(end.getDate() + 1)
+  }
+  const finalCheckIn = start.toISOString().slice(0, 10)
+  const finalCheckOut = end.toISOString().slice(0, 10)
+  if (finalCheckOut <= finalCheckIn) return res.status(400).json({ error: 'Check-out must be after check-in' })
+
+  const overlapping = bookingQueries.getOverlapping.all(req.user.id, roomNumber, finalCheckOut, finalCheckIn)
+  if (overlapping.length > 0) {
+    return res.status(409).json({ error: 'Cell already has a guest booking' })
+  }
+
+  const guestData = { ...(guest || {}), fullName, email }
+  const result = bookingQueries.create.run(
+    req.user.id,
+    'Manual',
+    fullName || email.split('@')[0],
+    email,
+    JSON.stringify(guestData),
+    roomNumber,
+    finalCheckIn,
+    finalCheckOut,
+    guest?.gender || null,
+    null,
+    'CONFIRMED'
+  )
+
+  const newBooking = bookingQueries.getByIdByUserId.get(req.user.id, result.lastInsertRowid)
+  res.status(201).json(formatBooking(newBooking))
+})
+
+// Update guest details for an existing booking.
+app.patch('/api/bookings/:id/guest', requireAuth, (req, res) => {
+  const bookingId = parseInt(req.params.id)
+  if (!Number.isFinite(bookingId)) return res.status(400).json({ error: 'Invalid booking id' })
+
+  const row = bookingQueries.getByIdByUserId.get(req.user.id, bookingId)
+  if (!row) return res.status(404).json({ error: 'Booking not found' })
+
+  const nextGuest = req.body?.guest || {}
+  const stay = req.body?.stay || {}
+  const fullName = String(nextGuest.fullName || '').trim()
+  const email = String(nextGuest.email || '').trim().toLowerCase()
+  if (!email) return res.status(400).json({ error: 'Email is required' })
+
+  const nextCheckIn = String(stay.checkIn || row.check_in).trim()
+  const nextCheckOut = String(stay.checkOut || row.check_out).trim()
+  if (!nextCheckIn || !nextCheckOut) return res.status(400).json({ error: 'Missing check-in/check-out' })
+  if (nextCheckOut <= nextCheckIn) return res.status(400).json({ error: 'Check-out must be after check-in' })
+
+  const overlapping = bookingQueries.getOverlappingExcludingId.all(
+    req.user.id,
+    row.room_number,
+    bookingId,
+    nextCheckOut,
+    nextCheckIn
+  )
+  if (overlapping.length > 0) {
+    return res.status(409).json({ error: 'Booking overlaps with an existing booking' })
+  }
+
+  const guestData = { ...safeJsonParse(row.guest_data_json, {}), ...nextGuest, fullName, email }
+  bookingQueries.updateDatesAndGuestByUserId.run(
+    nextCheckIn,
+    nextCheckOut,
+    fullName || row.guest_name,
+    email,
+    JSON.stringify(guestData),
+    req.user.id,
+    bookingId
+  )
+
+  const updated = bookingQueries.getByIdByUserId.get(req.user.id, bookingId)
+  res.json(formatBooking(updated))
 })
 
 // Delete booking

@@ -1,7 +1,34 @@
-import { useState, useRef, useEffect } from 'react'
+import { useCallback, useMemo, useState, useRef, useEffect } from 'react'
 import '../styles/BookingCalendar.css'
+import GuestModal from './GuestModal'
+import { apiFetch } from '../utils/api'
+
+function formatISODateLocal(date) {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+function addDaysISO(dateStr, daysToAdd) {
+  const d = new Date(dateStr + 'T00:00:00')
+  d.setDate(d.getDate() + daysToAdd)
+  return formatISODateLocal(d)
+}
 
 function BookingCalendar({ bookings, rooms }) {
+  // Check if a date is today (function declaration so it’s safely hoisted)
+  function isToday(date) {
+    const today = new Date()
+    return date.toDateString() === today.toDateString()
+  }
+
+  // Check if date is weekend (function declaration so it’s safely hoisted)
+  function isWeekend(date) {
+    const day = date.getDay()
+    return day === 0 || day === 6
+  }
+
   // Start with current month, or first booking's month if bookings exist
   const getInitialDate = () => {
     if (bookings && bookings.length > 0) {
@@ -34,20 +61,48 @@ function BookingCalendar({ bookings, rooms }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bookings?.length]) // Only depend on bookings length to avoid cascading
 
-  // Get days in current month view
-  const getDaysInMonth = (date) => {
-    const year = date.getFullYear()
-    const month = date.getMonth()
+  const { days, monthStart, monthEnd } = useMemo(() => {
+    const year = currentDate.getFullYear()
+    const month = currentDate.getMonth()
     const daysInMonth = new Date(year, month + 1, 0).getDate()
-    
-    const days = []
-    for (let day = 1; day <= daysInMonth; day++) {
-      days.push(new Date(year, month, day))
-    }
-    return days
-  }
 
-  const days = getDaysInMonth(currentDate)
+    const list = []
+    for (let day = 1; day <= daysInMonth; day++) {
+      list.push(new Date(year, month, day))
+    }
+
+    const start = new Date(year, month, 1)
+    start.setHours(0, 0, 0, 0)
+    const end = new Date(year, month, daysInMonth)
+    end.setHours(23, 59, 59, 999)
+
+    return { days: list, monthStart: start, monthEnd: end }
+  }, [currentDate])
+
+  const dayMeta = useMemo(() => {
+    return days.map((day) => ({
+      day,
+      dateStr: formatISODateLocal(day),
+      isToday: isToday(day),
+      isWeekend: isWeekend(day)
+    }))
+  }, [days])
+
+  const bookingsByRoom = useMemo(() => {
+    const map = new Map()
+    for (const booking of bookings || []) {
+      const checkIn = new Date(booking.checkIn + 'T00:00:00')
+      const checkOut = new Date(booking.checkOut + 'T00:00:00') // exclusive
+      const overlaps = checkIn <= monthEnd && checkOut >= monthStart
+      if (!overlaps) continue
+
+      const key = booking.roomNumber
+      const list = map.get(key)
+      if (list) list.push(booking)
+      else map.set(key, [booking])
+    }
+    return map
+  }, [bookings, monthStart, monthEnd])
 
   // Navigate months
   const goToPreviousMonth = () => {
@@ -69,17 +124,128 @@ function BookingCalendar({ bookings, rooms }) {
     }, 100)
   }
 
-  // Check if a date is today
-  const isToday = (date) => {
-    const today = new Date()
-    return date.toDateString() === today.toDateString()
-  }
+  const [guestModal, setGuestModal] = useState({
+    open: false,
+    mode: 'create', // 'create' | 'edit'
+    roomNumber: '',
+    date: '',
+    bookingId: null,
+    initialGuest: null,
+    error: null,
+    saving: false,
+    deleting: false
+  })
 
-  // Check if date is weekend
-  const isWeekend = (date) => {
-    const day = date.getDay()
-    return day === 0 || day === 6
-  }
+  const suppressOpenUntilRef = useRef(0)
+
+  const closeGuestModal = useCallback(() => {
+    setGuestModal(prev => ({ ...prev, open: false, error: null, saving: false, deleting: false }))
+  }, [])
+
+  const findBookingForCell = useCallback((roomNumber, dateStr) => {
+    const roomBookings = bookingsByRoom.get(roomNumber) || []
+    // Booking interval: [checkIn, checkOut) (checkout day is not occupied).
+    return roomBookings.find(b => dateStr >= b.checkIn && dateStr < b.checkOut) || null
+  }, [bookingsByRoom])
+
+  const openGuestModalForCell = useCallback((roomNumber, dateStr) => {
+    if (Date.now() < suppressOpenUntilRef.current) return
+
+    const booking = findBookingForCell(roomNumber, dateStr)
+    if (booking) {
+      setGuestModal({
+        open: true,
+        mode: 'edit',
+        roomNumber,
+        date: dateStr,
+        bookingId: booking.id,
+        initialGuest: {
+          guest: booking.guest || { fullName: booking.guestName, email: booking.guestEmail },
+          stay: { checkIn: booking.checkIn, checkOut: booking.checkOut }
+        },
+        error: null,
+        saving: false,
+        deleting: false
+      })
+      return
+    }
+
+    setGuestModal({
+      open: true,
+      mode: 'create',
+      roomNumber,
+      date: dateStr,
+      bookingId: null,
+      initialGuest: {
+        guest: { fullName: '', email: '', phone: '', gender: '' },
+        stay: { checkIn: dateStr, checkOut: addDaysISO(dateStr, 1) }
+      },
+      error: null,
+      saving: false,
+      deleting: false
+    })
+  }, [findBookingForCell])
+
+  const handleCellClick = useCallback((e) => {
+    const roomNumber = e.currentTarget.dataset.room
+    const dateStr = e.currentTarget.dataset.date
+    if (!roomNumber || !dateStr) return
+    openGuestModalForCell(roomNumber, dateStr)
+  }, [openGuestModalForCell])
+
+  const handleSaveGuest = useCallback(async (value) => {
+    setGuestModal(prev => ({ ...prev, saving: true, error: null }))
+    try {
+      const guest = value?.guest || {}
+      const stay = value?.stay || {}
+      if (guestModal.mode === 'edit' && guestModal.bookingId) {
+        const res = await apiFetch(`/api/bookings/${guestModal.bookingId}/guest`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ guest, stay })
+        })
+        const data = await res.json().catch(() => null)
+        if (!res.ok) throw new Error(data?.error || 'Failed to save guest')
+      } else {
+        const res = await apiFetch('/api/bookings/cell', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            roomNumber: guestModal.roomNumber,
+            checkIn: stay.checkIn || guestModal.date,
+            checkOut: stay.checkOut || addDaysISO(guestModal.date, 1),
+            guest
+          })
+        })
+        const data = await res.json().catch(() => null)
+        if (!res.ok) throw new Error(data?.error || 'Failed to add guest')
+      }
+
+      // On mobile, the tap that hits "Save" can also hit the underlying cell after the modal unmounts.
+      // Suppress cell-open for a short window so the modal actually stays closed.
+      suppressOpenUntilRef.current = Date.now() + 700
+      closeGuestModal()
+      window.dispatchEvent(new Event('booking-changed'))
+    } catch (err) {
+      setGuestModal(prev => ({ ...prev, saving: false, error: err.message || 'Save failed' }))
+    }
+  }, [guestModal.mode, guestModal.bookingId, guestModal.roomNumber, guestModal.date, closeGuestModal])
+
+  const handleDeleteGuest = useCallback(async () => {
+    if (!guestModal.bookingId) return
+    setGuestModal(prev => ({ ...prev, deleting: true, error: null }))
+    try {
+      const res = await apiFetch(`/api/bookings/${guestModal.bookingId}`, { method: 'DELETE' })
+      const data = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(data?.error || 'Failed to delete booking')
+
+      suppressOpenUntilRef.current = Date.now() + 700
+      closeGuestModal()
+      window.dispatchEvent(new Event('booking-changed'))
+    } catch (err) {
+      setGuestModal(prev => ({ ...prev, deleting: false, error: err.message || 'Delete failed' }))
+    }
+  }, [guestModal.bookingId, closeGuestModal])
 
   // Format month/year for header
   const formatMonthYear = (date) => {
@@ -91,33 +257,7 @@ function BookingCalendar({ bookings, rooms }) {
     return date.toLocaleDateString('en-US', { weekday: 'short' })
   }
 
-  // Get bookings for a specific room that overlap with current month
-  const getRoomBookings = (roomNumber) => {
-    if (!days || days.length === 0) return []
-    
-    const monthStart = new Date(days[0])
-    monthStart.setHours(0, 0, 0, 0)
-    const monthEnd = new Date(days[days.length - 1])
-    monthEnd.setHours(23, 59, 59, 999)
-    
-    const filtered = bookings.filter(booking => {
-      if (booking.roomNumber !== roomNumber) return false
-      const checkIn = new Date(booking.checkIn + 'T00:00:00')
-      const checkOut = new Date(booking.checkOut + 'T23:59:59')
-      // Booking overlaps if it starts before month ends AND ends after month starts
-      const overlaps = checkIn <= monthEnd && checkOut >= monthStart
-      if (overlaps) {
-        console.log(`✅ Booking ${booking.guestName} (${booking.checkIn} → ${booking.checkOut}) overlaps with ${formatMonthYear(currentDate)}`)
-      }
-      return overlaps
-    })
-    
-    if (filtered.length > 0) {
-      console.log(`📋 Room ${roomNumber}: ${filtered.length} booking(s)`, filtered)
-    }
-    
-    return filtered
-  }
+  const getRoomBookings = (roomNumber) => bookingsByRoom.get(roomNumber) || []
 
   // Calculate booking block position and width
   const getBookingStyle = (booking) => {
@@ -128,13 +268,14 @@ function BookingCalendar({ bookings, rooms }) {
     
     // Parse check-in and check-out dates (YYYY-MM-DD format)
     // Check-in: Jan 14 means guest arrives on Jan 14
-    // Check-out: Jan 15 means guest leaves on Jan 15 (room occupied until Jan 15)
-    // Display: show from Jan 14 through the night to Jan 15 morning
+    // Booking interval: [checkIn, checkOut) (checkout day is not occupied).
     const [checkInYear, checkInMonth, checkInDay] = booking.checkIn.split('-').map(Number)
     const [checkOutYear, checkOutMonth, checkOutDay] = booking.checkOut.split('-').map(Number)
     
     const checkIn = new Date(checkInYear, checkInMonth - 1, checkInDay, 0, 0, 0)
-    const checkOut = new Date(checkOutYear, checkOutMonth - 1, checkOutDay, 0, 0, 0)
+    const checkOutExclusive = new Date(checkOutYear, checkOutMonth - 1, checkOutDay, 0, 0, 0)
+    const checkOutInclusive = new Date(checkOutExclusive)
+    checkOutInclusive.setDate(checkOutInclusive.getDate() - 1)
     
     const monthStart = new Date(days[0])
     monthStart.setHours(0, 0, 0, 0)
@@ -143,7 +284,7 @@ function BookingCalendar({ bookings, rooms }) {
 
     // Clamp dates to current month view
     const displayStart = checkIn < monthStart ? monthStart : checkIn
-    const displayEnd = checkOut > monthEnd ? monthEnd : checkOut
+    const displayEnd = checkOutInclusive > monthEnd ? monthEnd : checkOutInclusive
 
     // Calculate day index from month start (0-indexed)
     // Jan 1 = day 1 of month = index 0
@@ -194,7 +335,7 @@ function BookingCalendar({ bookings, rooms }) {
   // Check if booking ends after current month
   const endsAfterMonth = (booking) => {
     if (!days || days.length === 0) return false
-    const checkOut = new Date(booking.checkOut + 'T23:59:59')
+    const checkOut = new Date(booking.checkOut + 'T00:00:00')
     const monthEnd = new Date(days[days.length - 1])
     monthEnd.setHours(23, 59, 59, 999)
     return checkOut > monthEnd
@@ -264,11 +405,11 @@ function BookingCalendar({ bookings, rooms }) {
           {/* Header Row - Days */}
           <div className="calendar-row header-row">
             <div className="room-label-cell header-cell">Room</div>
-            {days.map((day, index) => (
+            {dayMeta.map(({ day, isToday: dayIsToday, isWeekend: dayIsWeekend }, index) => (
               <div 
                 key={index} 
-                className={`day-cell header-cell ${isToday(day) ? 'today' : ''} ${isWeekend(day) ? 'weekend' : ''}`}
-                ref={isToday(day) ? todayRef : null}
+                className={`day-cell header-cell ${dayIsToday ? 'today' : ''} ${dayIsWeekend ? 'weekend' : ''}`}
+                ref={dayIsToday ? todayRef : null}
               >
                 <span className="day-name">{formatDayHeader(day)}</span>
                 <span className="day-number">{day.getDate()}</span>
@@ -279,7 +420,6 @@ function BookingCalendar({ bookings, rooms }) {
           {/* Room Rows */}
           {rooms.map(room => {
             const roomBookings = getRoomBookings(room.roomNumber)
-            console.log(`🏠 Room ${room.roomNumber}: ${roomBookings.length} bookings`, roomBookings)
             
             return (
               <div key={room.roomNumber} className="calendar-row room-row">
@@ -289,22 +429,31 @@ function BookingCalendar({ bookings, rooms }) {
                 </div>
                 <div className="bookings-track">
                   {/* Day grid background */}
-                  {days.map((day, index) => (
+                  {dayMeta.map(({ isToday: dayIsToday, isWeekend: dayIsWeekend, dateStr }, index) => (
                     <div 
                       key={index} 
-                      className={`day-slot ${isToday(day) ? 'today' : ''} ${isWeekend(day) ? 'weekend' : ''}`}
-                    />
+                      className={`day-slot ${dayIsToday ? 'today' : ''} ${dayIsWeekend ? 'weekend' : ''}`}
+                      data-room={room.roomNumber}
+                      data-date={dateStr}
+                      onClick={handleCellClick}
+                    >
+                      <button
+                        type="button"
+                        className="cell-add-btn"
+                        aria-label="Add or edit guest"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          openGuestModalForCell(room.roomNumber, dateStr)
+                        }}
+                      >
+                        +
+                      </button>
+                    </div>
                   ))}
                   
                   {/* Booking blocks */}
                   {roomBookings.map(booking => {
                     const style = getBookingStyle(booking)
-                    console.log(`📦 Rendering booking ${booking.guestName}:`, {
-                      checkIn: booking.checkIn,
-                      checkOut: booking.checkOut,
-                      style,
-                      room: booking.roomNumber
-                    })
                     return (
                       <div
                         key={booking.id}
@@ -313,7 +462,29 @@ function BookingCalendar({ bookings, rooms }) {
                         onClick={(e) => handleBookingClick(booking, e)}
                         title={`${booking.guestName} - ${booking.checkIn} to ${booking.checkOut}`}
                       >
-                        <span className="booking-guest">{booking.guestName}</span>
+                        <span
+                          className="booking-guest"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setGuestModal({
+                              open: true,
+                              mode: 'edit',
+                              roomNumber: booking.roomNumber,
+                              date: booking.checkIn,
+                              bookingId: booking.id,
+                              initialGuest: {
+                                guest: booking.guest || { fullName: booking.guestName, email: booking.guestEmail },
+                                stay: { checkIn: booking.checkIn, checkOut: booking.checkOut }
+                              },
+                              error: null,
+                              saving: false,
+                              deleting: false
+                            })
+                          }}
+                          title="Edit guest"
+                        >
+                          {booking.guestName}
+                        </span>
                         <span className="booking-platform">{booking.meta?.bed || 'N/A'}</span>
                       </div>
                     )
@@ -324,6 +495,25 @@ function BookingCalendar({ bookings, rooms }) {
           })}
         </div>
       </div>
+
+      {/* Guest modal */}
+      <GuestModal
+        key={`${guestModal.mode}:${guestModal.bookingId || ''}:${guestModal.roomNumber}:${guestModal.date}:${guestModal.open ? 'open' : 'closed'}`}
+        open={guestModal.open}
+        title={guestModal.mode === 'edit' ? 'Edit Guest' : 'Add Guest'}
+        initialValue={guestModal.initialGuest}
+        popupClassName="guest-modal"
+        saving={guestModal.saving}
+        deleting={guestModal.deleting}
+        onClose={closeGuestModal}
+        onSave={handleSaveGuest}
+        onDelete={guestModal.mode === 'edit' ? handleDeleteGuest : undefined}
+      />
+      {guestModal.open && guestModal.error && (
+        <div className="auth-error" style={{ margin: '12px 16px 0 16px' }}>
+          {guestModal.error}
+        </div>
+      )}
 
       {/* Booking Detail Popup */}
       {selectedBooking && (
