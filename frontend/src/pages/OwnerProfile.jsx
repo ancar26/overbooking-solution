@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import '../styles/Pages.css'
+import { apiFetch } from '../utils/api'
 
 const API_URL = '/api'
 
@@ -16,9 +17,17 @@ function OwnerProfile() {
   const fetchData = async () => {
     try {
       const [profileRes, bookingsRes] = await Promise.all([
-        fetch(`${API_URL}/profile`),
-        fetch(`${API_URL}/bookings`)
+        apiFetch(`${API_URL}/profile`),
+        apiFetch(`${API_URL}/bookings`)
       ])
+
+      if (profileRes.status === 401 || bookingsRes.status === 401) {
+        // Session is not valid anymore.
+        localStorage.removeItem('authToken')
+        localStorage.removeItem('authUser')
+        window.dispatchEvent(new Event('auth-changed'))
+        return
+      }
 
       if (!profileRes.ok || !bookingsRes.ok) {
         throw new Error('Failed to fetch data')
@@ -64,8 +73,8 @@ function OwnerProfile() {
     return (
       <div className="profile-page">
         <div className="profile-error">
-          <h2>⚠️ Connection Error</h2>
-          <p>{error}</p>
+            <h2>⚠️ Connection Error</h2>
+            <p>{error}</p>
           <p className="error-hint">Make sure to run: <code>cd backend && npm start</code></p>
         </div>
       </div>
@@ -106,8 +115,8 @@ function OwnerProfile() {
                 <span className="stat-label">Bookings</span>
               </div>
             </div>
-          </div>
-
+            </div>
+            
           {/* Owner Info */}
           <div className="profile-card info-card">
             <h3>Owner Information</h3>
@@ -119,10 +128,10 @@ function OwnerProfile() {
               <div className="info-row">
                 <span className="info-label">Email</span>
                 <span className="info-value email">{profile.email}</span>
-              </div>
             </div>
-          </div>
-
+            </div>
+            </div>
+            
           {/* Booking Sources */}
           <div className="profile-card sources-card">
             <h3>Booking Sources</h3>
@@ -131,7 +140,7 @@ function OwnerProfile() {
                 <div key={platform} className="source-item">
                   <span className="source-name">{platform}</span>
                   <span className="source-count">{getBookingsByPlatform(platform)} bookings</span>
-                </div>
+            </div>
               ))}
             </div>
             <p className="sources-note">

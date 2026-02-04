@@ -5,6 +5,7 @@ import {
   requestNotificationPermission, 
   showNewBookingNotification
 } from '../utils/notifications'
+import { apiFetch } from '../utils/api'
 import '../styles/Pages.css'
 
 const API_URL = '/api'
@@ -26,10 +27,17 @@ function BookingsStatus() {
       if (showLoading) setLoading(true)
       
       const [profileRes, bookingsRes, roomsRes] = await Promise.all([
-        fetch(`${API_URL}/profile`),
-        fetch(`${API_URL}/bookings`),
-        fetch(`${API_URL}/rooms`)
+        apiFetch(`${API_URL}/profile`),
+        apiFetch(`${API_URL}/bookings`),
+        apiFetch(`${API_URL}/rooms`)
       ])
+
+      if (profileRes.status === 401 || bookingsRes.status === 401 || roomsRes.status === 401) {
+        localStorage.removeItem('authToken')
+        localStorage.removeItem('authUser')
+        window.dispatchEvent(new Event('auth-changed'))
+        return
+      }
 
       if (!profileRes.ok || !bookingsRes.ok || !roomsRes.ok) {
         throw new Error('Failed to fetch data')
@@ -38,6 +46,9 @@ function BookingsStatus() {
       const profileData = await profileRes.json()
       const bookingsData = await bookingsRes.json()
       const roomsData = await roomsRes.json()
+
+      console.log('📅 Fetched bookings:', bookingsData.length, bookingsData)
+      console.log('🏠 Fetched rooms:', roomsData)
 
       setProfile(profileData)
       setBookings(bookingsData)
@@ -131,7 +142,7 @@ function BookingsStatus() {
     const newBookingTimer = setTimeout(async () => {
       console.log('🔔 Triggering new booking demo...')
       try {
-        const response = await fetch(`${API_URL}/demo/random-booking`, {
+        const response = await apiFetch(`${API_URL}/demo/random-booking`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' }
         })
@@ -165,6 +176,14 @@ function BookingsStatus() {
 
   useEffect(() => {
     fetchData(true)
+  }, [fetchData])
+
+  useEffect(() => {
+    const listener = () => {
+      fetchData(false)
+    }
+    window.addEventListener('booking-changed', listener)
+    return () => window.removeEventListener('booking-changed', listener)
   }, [fetchData])
 
   if (loading) {
