@@ -180,21 +180,6 @@ function OwnerProfile() {
             </div>
           </div>
 
-          {/* Property Stats */}
-          <div className="profile-card stats-card">
-            <h3>Property Statistics</h3>
-            <div className="stats-grid stats-grid-2">
-              <div className="stat-item">
-                <span className="stat-value">{profile.totalRooms}</span>
-                <span className="stat-label">Rooms</span>
-              </div>
-              <div className="stat-item">
-                <span className="stat-value">{bookings.length}</span>
-                <span className="stat-label">Bookings</span>
-              </div>
-            </div>
-            </div>
-            
           {/* Owner Info */}
           <div className="profile-card info-card">
             <h3>Owner Information</h3>
