@@ -1,9 +1,10 @@
 // Backend server for Booking Calendar App
-// Displays confirmed bookings from external platforms (Booking.com, Agoda)
-// Each room is private - only one booking per room at a time
+// SQLite database for persistence
 
 import express from 'express'
 import cors from 'cors'
+import crypto from 'crypto'
+import db, { userQueries, propertyQueries, bookingQueries } from './database.js'
 
 const app = express()
 const PORT = 3000
@@ -12,467 +13,486 @@ app.use(cors())
 app.use(express.json())
 
 // ============================================
-// DATABASE (In-memory storage)
+// HELPER FUNCTIONS
 // ============================================
 
-// Property configuration
 const ROOMS = ['A1', 'A2', 'B1', 'B2']
-
-// Property profile
-const propertyProfile = {
-  id: 1,
-  name: 'Property Owner',
-  propertyName: 'Sunset Villa',
-  totalRooms: 4,
-  email: 'owner@example.com'
+const ROOM_LABELS = {
+  A1: 'privateA',
+  A2: 'privateB',
+  B1: 'dorm1',
+  B2: 'dorm2'
 }
 
-// Booking platforms
-const PLATFORMS = ['Booking.com', 'Agoda']
-
-// Color palette for bookings
 const BOOKING_COLORS = [
   '#4CAF50', '#2196F3', '#FF9800', '#E91E63', '#9C27B0',
   '#00BCD4', '#F44336', '#8BC34A', '#FF5722', '#3F51B5'
-]
-
-// Random guest names for demo
-const DEMO_FIRST_NAMES = [
-  'James', 'Maria', 'David', 'Sarah', 'Michael', 'Emma', 'John', 'Olivia',
-  'Robert', 'Sophia', 'William', 'Isabella', 'Thomas', 'Mia', 'Daniel', 'Charlotte'
-]
-
-const DEMO_LAST_NAMES = [
-  'Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Garcia', 'Miller', 'Davis',
-  'Rodriguez', 'Martinez', 'Wilson', 'Anderson', 'Taylor', 'Moore', 'Jackson', 'Lee'
 ]
 
 function getBookingColor(bookingId) {
   return BOOKING_COLORS[bookingId % BOOKING_COLORS.length]
 }
 
-function generateGuestName() {
-  const firstName = DEMO_FIRST_NAMES[Math.floor(Math.random() * DEMO_FIRST_NAMES.length)]
-  const lastName = DEMO_LAST_NAMES[Math.floor(Math.random() * DEMO_LAST_NAMES.length)]
-  return `${firstName} ${lastName}`
+function hashPassword(password, salt) {
+  return crypto.createHash('sha256').update(password + salt).digest('hex')
 }
 
-function generateEmail(name) {
-  const [first, last] = name.toLowerCase().split(' ')
-  return `${first}.${last.charAt(0)}@email.com`
+function generateToken(email) {
+  return Buffer.from(`${email}:${Date.now()}`).toString('base64')
 }
 
-let nextBookingId = 20
-
-// Confirmed bookings - NO OVERLAPPING dates per room
-// Each room is private, one guest at a time
-const bookings = [
-  // ========== ROOM A1 (sequential, no overlap) ==========
-  {
-    id: 1,
-    platform: 'Booking.com',
-    guestName: 'Alice Johnson',
-    guestEmail: 'alice.j@email.com',
-    roomNumber: 'A1',
-    checkIn: '2026-01-02',
-    checkOut: '2026-01-05',
-    status: 'CONFIRMED',
-    createdAt: '2025-12-20T08:00:00Z'
-  },
-  {
-    id: 2,
-    platform: 'Agoda',
-    guestName: 'Bob Smith',
-    guestEmail: 'bob.s@email.com',
-    roomNumber: 'A1',
-    checkIn: '2026-01-06',
-    checkOut: '2026-01-10',
-    status: 'CONFIRMED',
-    createdAt: '2025-12-21T09:00:00Z'
-  },
-  {
-    id: 3,
-    platform: 'Booking.com',
-    guestName: 'Carol Davis',
-    guestEmail: 'carol.d@email.com',
-    roomNumber: 'A1',
-    checkIn: '2026-01-12',
-    checkOut: '2026-01-16',
-    status: 'CONFIRMED',
-    createdAt: '2025-12-22T10:00:00Z'
-  },
-  {
-    id: 4,
-    platform: 'Agoda',
-    guestName: 'Dan Wilson',
-    guestEmail: 'dan.w@email.com',
-    roomNumber: 'A1',
-    checkIn: '2026-01-18',
-    checkOut: '2026-01-22',
-    status: 'CONFIRMED',
-    createdAt: '2025-12-23T11:00:00Z'
-  },
-  {
-    id: 5,
-    platform: 'Booking.com',
-    guestName: 'Eve Martinez',
-    guestEmail: 'eve.m@email.com',
-    roomNumber: 'A1',
-    checkIn: '2026-01-25',
-    checkOut: '2026-01-29',
-    status: 'CONFIRMED',
-    createdAt: '2025-12-24T12:00:00Z'
-  },
-  
-  // ========== ROOM A2 (sequential, no overlap) ==========
-  {
-    id: 6,
-    platform: 'Agoda',
-    guestName: 'Frank Miller',
-    guestEmail: 'frank.m@email.com',
-    roomNumber: 'A2',
-    checkIn: '2026-01-03',
-    checkOut: '2026-01-07',
-    status: 'CONFIRMED',
-    createdAt: '2025-12-18T08:00:00Z'
-  },
-  {
-    id: 7,
-    platform: 'Booking.com',
-    guestName: 'Grace Lee',
-    guestEmail: 'grace.l@email.com',
-    roomNumber: 'A2',
-    checkIn: '2026-01-08',
-    checkOut: '2026-01-12',
-    status: 'CONFIRMED',
-    createdAt: '2025-12-19T09:00:00Z'
-  },
-  {
-    id: 8,
-    platform: 'Agoda',
-    guestName: 'Henry Taylor',
-    guestEmail: 'henry.t@email.com',
-    roomNumber: 'A2',
-    checkIn: '2026-01-14',
-    checkOut: '2026-01-18',
-    status: 'CONFIRMED',
-    createdAt: '2025-12-20T10:00:00Z'
-  },
-  {
-    id: 9,
-    platform: 'Booking.com',
-    guestName: 'Ivy Chen',
-    guestEmail: 'ivy.c@email.com',
-    roomNumber: 'A2',
-    checkIn: '2026-01-20',
-    checkOut: '2026-01-24',
-    status: 'CONFIRMED',
-    createdAt: '2025-12-21T11:00:00Z'
-  },
-  {
-    id: 10,
-    platform: 'Agoda',
-    guestName: 'Jack Anderson',
-    guestEmail: 'jack.a@email.com',
-    roomNumber: 'A2',
-    checkIn: '2026-01-26',
-    checkOut: '2026-01-30',
-    status: 'CONFIRMED',
-    createdAt: '2025-12-22T12:00:00Z'
-  },
-  
-  // ========== ROOM B1 (sequential, no overlap) ==========
-  {
-    id: 11,
-    platform: 'Booking.com',
-    guestName: 'Kate White',
-    guestEmail: 'kate.w@email.com',
-    roomNumber: 'B1',
-    checkIn: '2026-01-01',
-    checkOut: '2026-01-04',
-    status: 'CONFIRMED',
-    createdAt: '2025-12-15T08:00:00Z'
-  },
-  {
-    id: 12,
-    platform: 'Agoda',
-    guestName: 'Leo Garcia',
-    guestEmail: 'leo.g@email.com',
-    roomNumber: 'B1',
-    checkIn: '2026-01-05',
-    checkOut: '2026-01-09',
-    status: 'CONFIRMED',
-    createdAt: '2025-12-16T09:00:00Z'
-  },
-  {
-    id: 13,
-    platform: 'Booking.com',
-    guestName: 'Mia Robinson',
-    guestEmail: 'mia.r@email.com',
-    roomNumber: 'B1',
-    checkIn: '2026-01-11',
-    checkOut: '2026-01-15',
-    status: 'CONFIRMED',
-    createdAt: '2025-12-17T10:00:00Z'
-  },
-  {
-    id: 14,
-    platform: 'Agoda',
-    guestName: 'Noah Brown',
-    guestEmail: 'noah.b@email.com',
-    roomNumber: 'B1',
-    checkIn: '2026-01-17',
-    checkOut: '2026-01-21',
-    status: 'CONFIRMED',
-    createdAt: '2025-12-18T11:00:00Z'
-  },
-  {
-    id: 15,
-    platform: 'Booking.com',
-    guestName: 'Olivia Thomas',
-    guestEmail: 'olivia.t@email.com',
-    roomNumber: 'B1',
-    checkIn: '2026-01-23',
-    checkOut: '2026-01-27',
-    status: 'CONFIRMED',
-    createdAt: '2025-12-19T12:00:00Z'
-  },
-  
-  // ========== ROOM B2 (sequential, no overlap) ==========
-  {
-    id: 16,
-    platform: 'Agoda',
-    guestName: 'Paul Jackson',
-    guestEmail: 'paul.j@email.com',
-    roomNumber: 'B2',
-    checkIn: '2026-01-02',
-    checkOut: '2026-01-06',
-    status: 'CONFIRMED',
-    createdAt: '2025-12-14T08:00:00Z'
-  },
-  {
-    id: 17,
-    platform: 'Booking.com',
-    guestName: 'Quinn Harris',
-    guestEmail: 'quinn.h@email.com',
-    roomNumber: 'B2',
-    checkIn: '2026-01-07',
-    checkOut: '2026-01-11',
-    status: 'CONFIRMED',
-    createdAt: '2025-12-15T09:00:00Z'
-  },
-  {
-    id: 18,
-    platform: 'Agoda',
-    guestName: 'Rachel Clark',
-    guestEmail: 'rachel.c@email.com',
-    roomNumber: 'B2',
-    checkIn: '2026-01-13',
-    checkOut: '2026-01-17',
-    status: 'CONFIRMED',
-    createdAt: '2025-12-16T10:00:00Z'
-  },
-  {
-    id: 19,
-    platform: 'Booking.com',
-    guestName: 'Sam Turner',
-    guestEmail: 'sam.t@email.com',
-    roomNumber: 'B2',
-    checkIn: '2026-01-19',
-    checkOut: '2026-01-23',
-    status: 'CONFIRMED',
-    createdAt: '2025-12-17T11:00:00Z'
+function safeJsonParse(value, fallback) {
+  if (!value || typeof value !== 'string') return fallback
+  try {
+    return JSON.parse(value)
+  } catch {
+    return fallback
   }
-]
-
-// ============================================
-// HELPER: Check if dates overlap for a room
-// ============================================
-function hasOverlap(roomNumber, checkIn, checkOut, excludeBookingId = null) {
-  const newStart = new Date(checkIn)
-  const newEnd = new Date(checkOut)
-  
-  return bookings.some(booking => {
-    if (booking.roomNumber !== roomNumber) return false
-    if (excludeBookingId && booking.id === excludeBookingId) return false
-    
-    const existingStart = new Date(booking.checkIn)
-    const existingEnd = new Date(booking.checkOut)
-    
-    // Overlap if new booking starts before existing ends AND new booking ends after existing starts
-    return newStart < existingEnd && newEnd > existingStart
-  })
 }
 
-// Find available date slot for a room (no overlap allowed)
-function findAvailableSlot(roomNumber) {
-  const roomBookings = bookings
-    .filter(b => b.roomNumber === roomNumber)
-    .sort((a, b) => new Date(a.checkIn) - new Date(b.checkIn))
-  
-  // If no bookings for this room, use full month
-  if (roomBookings.length === 0) {
-    return { checkIn: '2026-01-10', checkOut: '2026-01-14' }
+function getTokenFromRequest(req) {
+  const authHeader = req.headers.authorization
+  if (authHeader && typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+    return authHeader.slice('Bearer '.length).trim()
   }
-  
-  // Look for gaps between bookings (need at least 3 days for a 2-night stay)
-  for (let i = 0; i < roomBookings.length - 1; i++) {
-    const currentEnd = new Date(roomBookings[i].checkOut)
-    const nextStart = new Date(roomBookings[i + 1].checkIn)
-    
-    // Gap in days between checkout and next checkin
-    const gapDays = Math.floor((nextStart - currentEnd) / (1000 * 60 * 60 * 24))
-    
-    // Need at least 3 days gap for a proper 2-night booking
-    if (gapDays >= 3) {
-      const checkInDate = new Date(currentEnd)
-      checkInDate.setDate(checkInDate.getDate() + 1) // Start day after checkout
-      
-      const nights = Math.min(gapDays - 1, 3) // Leave 1 day buffer, max 3 nights
-      const checkOutDate = new Date(checkInDate)
-      checkOutDate.setDate(checkOutDate.getDate() + nights)
-      
-      return {
-        checkIn: checkInDate.toISOString().split('T')[0],
-        checkOut: checkOutDate.toISOString().split('T')[0]
-      }
+  const alt = req.headers['x-auth-token']
+  if (alt && typeof alt === 'string') return alt
+  return null
+}
+
+function getUserFromToken(token) {
+  try {
+    // Demo token format: base64("email:timestamp"). Not a JWT.
+    const decoded = Buffer.from(token, 'base64').toString('utf-8')
+    const [email] = decoded.split(':')
+    if (!email) return null
+    return userQueries.findByEmail.get(email.toLowerCase())
+  } catch {
+    return null
+  }
+}
+
+function requireAuth(req, res, next) {
+  const token = getTokenFromRequest(req)
+  if (!token) return res.status(401).json({ error: 'Unauthenticated' })
+
+  const user = getUserFromToken(token)
+  if (!user) return res.status(401).json({ error: 'Unauthenticated' })
+
+  req.user = { id: user.id, name: user.name, email: user.email }
+  next()
+}
+
+function ensurePropertyRowForUser(user) {
+  // Assumption: each authenticated user manages exactly one property profile.
+  let property = propertyQueries.getByUserId.get(user.id)
+  if (property) return property
+
+  // Reasonable defaults: create a scoped property row, but mark setup incomplete.
+  propertyQueries.create.run(
+    user.id,
+    'My Property',
+    user.name,
+    0, // rooms (legacy field; treat as private rooms count)
+    0, // dorm_beds (legacy field; use dorms_json for real config)
+    0, // private_rooms
+    JSON.stringify([]), // dorms_json
+    0, // setup_completed
+    0, // current_guests
+    0, // checkins_today
+    0 // cancels_today
+  )
+  property = propertyQueries.getByUserId.get(user.id)
+  return property
+}
+
+function normalizeDorms(inputDorms) {
+  const dorms = Array.isArray(inputDorms) ? inputDorms : []
+  const normalized = dorms
+    .map((d, idx) => {
+      const id = (typeof d?.id === 'string' && d.id.trim()) ? d.id.trim() : `D${idx + 1}`
+      const name = (typeof d?.name === 'string' && d.name.trim()) ? d.name.trim() : `Dorm ${idx + 1}`
+      const beds = Number(d?.beds)
+      return { id, name, beds: Number.isFinite(beds) ? Math.max(0, Math.floor(beds)) : 0 }
+    })
+    .filter(d => d.id && d.beds >= 0)
+
+  // Ensure unique ids (stable keys for calendar rows / bookings).
+  const seen = new Set()
+  const deduped = []
+  for (const dorm of normalized) {
+    if (seen.has(dorm.id)) continue
+    seen.add(dorm.id)
+    deduped.push(dorm)
+  }
+  return deduped
+}
+
+function getDormsFromPropertyRow(propertyRow) {
+  return normalizeDorms(safeJsonParse(propertyRow?.dorms_json, []))
+}
+
+function buildRoomsFromProperty(propertyRow) {
+  const privateRooms = Number(propertyRow?.private_rooms ?? propertyRow?.rooms ?? 0) || 0
+  const dorms = getDormsFromPropertyRow(propertyRow)
+
+  const rooms = []
+  for (let i = 1; i <= privateRooms; i++) {
+    rooms.push({
+      roomNumber: `P${i}`,
+      type: 'Private',
+      label: `Private ${i}`
+    })
+  }
+
+  for (const dorm of dorms) {
+    for (let bedIndex = 1; bedIndex <= dorm.beds; bedIndex++) {
+      rooms.push({
+        roomNumber: `${dorm.id}-B${bedIndex}`,
+        type: 'Dorm',
+        label: `${dorm.name} - Bed ${bedIndex}`,
+        dormId: dorm.id,
+        dormName: dorm.name,
+        bedIndex
+      })
     }
   }
-  
-  // Check gap after last booking (until end of January)
-  const lastBooking = roomBookings[roomBookings.length - 1]
-  const lastEnd = new Date(lastBooking.checkOut)
-  const monthEnd = new Date('2026-01-31')
-  const gapDays = Math.floor((monthEnd - lastEnd) / (1000 * 60 * 60 * 24))
-  
-  if (gapDays >= 3) {
-    const checkInDate = new Date(lastEnd)
-    checkInDate.setDate(checkInDate.getDate() + 1)
-    
-    const nights = Math.min(gapDays - 1, 3)
-    const checkOutDate = new Date(checkInDate)
-    checkOutDate.setDate(checkOutDate.getDate() + nights)
-    
-    return {
-      checkIn: checkInDate.toISOString().split('T')[0],
-      checkOut: checkOutDate.toISOString().split('T')[0]
-    }
+
+  return rooms
+}
+
+// Convert DB row to booking format
+function formatBooking(row) {
+  return {
+    id: row.id,
+    platform: row.platform,
+    guestName: row.guest_name,
+    guestEmail: row.guest_email,
+    roomNumber: row.room_number,
+    checkIn: row.check_in,
+    checkOut: row.check_out,
+    meta: { sex: row.sex, bed: row.bed },
+    status: row.status,
+    createdAt: row.created_at,
+    color: getBookingColor(row.id)
   }
-  
-  return null // No available slot
+}
+
+// Convert DB property row to object
+function formatProperty(row) {
+  const dorms = getDormsFromPropertyRow(row)
+  const privateRooms = Number(row.private_rooms ?? row.rooms ?? 0) || 0
+  const setupCompleted = Boolean(row.setup_completed)
+  return {
+    locationName: row.location_name,
+    ownerName: row.owner_name,
+    // Legacy fields (kept for backwards compatibility with existing UI components)
+    rooms: row.rooms,
+    dormBeds: row.dorm_beds,
+    // New setup config
+    privateRooms,
+    dorms,
+    setupCompleted,
+    currentGuests: row.current_guests,
+    checkinsToday: row.checkins_today,
+    cancelsToday: row.cancels_today
+  }
 }
 
 // ============================================
 // API ENDPOINTS
 // ============================================
 
-app.get('/api/profile', (req, res) => {
-  res.json(propertyProfile)
+// Get property profile
+app.get('/api/profile', requireAuth, (req, res) => {
+  const property = ensurePropertyRowForUser(req.user)
+  if (!property) {
+    return res.status(404).json({ error: 'Property not found' })
+  }
+  const privateRooms = Number(property.private_rooms ?? property.rooms ?? 0) || 0
+  const dorms = getDormsFromPropertyRow(property)
+  const totalDormBeds = dorms.reduce((sum, d) => sum + (Number(d.beds) || 0), 0)
+  res.json({
+    propertyName: property.location_name,
+    ownerName: property.owner_name,
+    totalRooms: privateRooms,
+    totalCalendarRows: privateRooms + totalDormBeds,
+    setupCompleted: Boolean(property.setup_completed),
+    name: req.user.name,
+    email: req.user.email
+  })
 })
 
-app.get('/api/rooms', (req, res) => {
-  res.json(ROOMS.map(room => ({
-    roomNumber: room,
-    type: 'Private'
-  })))
+// Get rooms
+app.get('/api/rooms', requireAuth, (req, res) => {
+  const property = ensurePropertyRowForUser(req.user)
+  if (!property || !property.setup_completed) {
+    return res.json([])
+  }
+  res.json(buildRoomsFromProperty(property))
 })
 
-app.get('/api/bookings', (req, res) => {
-  const bookingsWithColors = bookings.map(booking => ({
-    ...booking,
-    color: getBookingColor(booking.id)
-  }))
-  res.json(bookingsWithColors)
+// Get property data
+app.get('/api/property', requireAuth, (req, res) => {
+  const property = ensurePropertyRowForUser(req.user)
+  if (!property) {
+    return res.status(404).json({ error: 'Property not found' })
+  }
+  res.json(formatProperty(property))
 })
 
-app.get('/api/bookings/room/:roomNumber', (req, res) => {
-  const roomBookings = bookings
-    .filter(b => b.roomNumber === req.params.roomNumber)
-    .map(booking => ({
-      ...booking,
-      color: getBookingColor(booking.id)
-    }))
-  res.json(roomBookings)
+// Update property data
+app.post('/api/property', requireAuth, (req, res) => {
+  const {
+    locationName,
+    ownerName,
+    // New config
+    privateRooms,
+    dorms,
+    // Legacy config (fallback)
+    rooms,
+    dormBeds,
+    // Stats
+    currentGuests,
+    checkinsToday,
+    cancelsToday
+  } = req.body
+  
+  // Ensure property row exists before updating it.
+  const existing = ensurePropertyRowForUser(req.user)
+
+  // Assumption (documented): if dorms are not provided, we treat dormBeds as "beds per dorm"
+  // and use a default of 2 dorms (legacy behavior).
+  const nextPrivateRooms = Number.isFinite(Number(privateRooms))
+    ? Math.max(0, Math.floor(Number(privateRooms)))
+    : Math.max(0, Math.floor(Number(rooms) || 0))
+
+  let nextDorms = Array.isArray(dorms) ? normalizeDorms(dorms) : null
+  if (!nextDorms) {
+    const bedsPerDorm = Math.max(0, Math.floor(Number(dormBeds) || 0))
+    nextDorms = [
+      { id: 'D1', name: 'Dorm 1', beds: bedsPerDorm },
+      { id: 'D2', name: 'Dorm 2', beds: bedsPerDorm }
+    ]
+  }
+
+  const setupCompleted = nextPrivateRooms > 0 || nextDorms.some(d => (Number(d.beds) || 0) > 0)
+
+  propertyQueries.update.run(
+    locationName ?? existing.location_name,
+    ownerName ?? existing.owner_name,
+    nextPrivateRooms, // rooms (legacy)
+    // legacy dorm_beds: keep the first dorm's bed count for compatibility
+    Number(nextDorms?.[0]?.beds) || 0,
+    nextPrivateRooms, // private_rooms
+    JSON.stringify(nextDorms),
+    setupCompleted ? 1 : 0,
+    Number(currentGuests) || 0,
+    Number(checkinsToday) || 0,
+    Number(cancelsToday) || 0,
+    req.user.id
+  )
+  
+  const property = ensurePropertyRowForUser(req.user)
+  res.json(formatProperty(property))
 })
 
-app.get('/api/bookings/:id', (req, res) => {
-  const booking = bookings.find(b => b.id === parseInt(req.params.id))
+// Get all bookings
+app.get('/api/bookings', requireAuth, (req, res) => {
+  const rows = bookingQueries.getAllByUserId.all(req.user.id)
+  const bookings = rows.map(formatBooking)
+  res.json(bookings)
+})
+
+// Get bookings for a room
+app.get('/api/bookings/room/:roomNumber', requireAuth, (req, res) => {
+  const rows = bookingQueries.getByRoomByUserId.all(req.user.id, req.params.roomNumber)
+  const bookings = rows.map(formatBooking)
+  res.json(bookings)
+})
+
+// Get single booking
+app.get('/api/bookings/:id', requireAuth, (req, res) => {
+  const row = bookingQueries.getByIdByUserId.get(req.user.id, parseInt(req.params.id))
+  if (!row) {
+    return res.status(404).json({ error: 'Booking not found' })
+  }
+  res.json(formatBooking(row))
+})
+
+// Add manual guest
+app.post('/api/manual-guests', requireAuth, (req, res) => {
+  const { name, sex, room, bed, checkIn, checkOut } = req.body
+  
+  console.log(`📝 Adding manual guest: ${name}, Room: ${room}, Dates: ${checkIn} → ${checkOut}, Bed: ${bed}`)
+  
+  // Validate required fields
+  if (!name || !room || !checkIn || !checkOut) {
+    console.log('❌ Missing required fields')
+    return res.status(400).json({ error: 'Missing required fields' })
+  }
+  
+  // If a bed is provided, treat it as a distinct calendar row (dorm bed).
+  // Example accepted inputs:
+  // - room="D1-B2" (already a bed row)
+  // - room="D1", bed="2" (combined to "D1-B2")
+  const roomKey = (bed && typeof bed === 'string' && bed.trim() && typeof room === 'string' && room.includes('-B'))
+    ? room
+    : (bed && `${room}-B${String(bed).trim()}`) || room
+
+  // Check for overlapping bookings
+  const overlapping = bookingQueries.getOverlapping.all(req.user.id, roomKey, checkOut, checkIn)
+  
+  if (overlapping.length > 0) {
+    console.log(`❌ Overlap detected with existing bookings:`, overlapping)
+    return res.status(409).json({ 
+      error: 'Room already booked in that period',
+      conflicts: overlapping.map(b => `${b.guest_name} (${b.check_in} → ${b.check_out})`)
+    })
+  }
+  
+  // Add booking to database
+  const result = bookingQueries.create.run(
+    req.user.id,
+    'Manual',
+    name,
+    `${name.toLowerCase().replace(/\s+/g, '.')}@manual.local`,
+    roomKey,
+    checkIn,
+    checkOut,
+    sex || null,
+    bed || null,
+    'CONFIRMED'
+  )
+  
+  // Update current guests count
+  const property = ensurePropertyRowForUser(req.user)
+  propertyQueries.update.run(
+    property.location_name,
+    property.owner_name,
+    property.rooms,
+    property.dorm_beds,
+    property.private_rooms ?? property.rooms ?? 0,
+    property.dorms_json ?? '[]',
+    property.setup_completed ? 1 : 0,
+    (property.current_guests || 0) + 1,
+    property.checkins_today,
+    property.cancels_today,
+    req.user.id
+  )
+  
+  // Fetch the newly created booking
+  const newBooking = bookingQueries.getByIdByUserId.get(req.user.id, result.lastInsertRowid)
+  
+  console.log(`✅ Manual guest added: ${newBooking.guest_name} in ${newBooking.room_number} (${newBooking.check_in} → ${newBooking.check_out})`)
+  
+  res.status(201).json({ guest: formatBooking(newBooking) })
+})
+
+// Delete booking
+app.delete('/api/bookings/:id', requireAuth, (req, res) => {
+  const bookingId = parseInt(req.params.id)
+  const booking = bookingQueries.getByIdByUserId.get(req.user.id, bookingId)
+  
   if (!booking) {
     return res.status(404).json({ error: 'Booking not found' })
   }
-  res.json({
-    ...booking,
-    color: getBookingColor(booking.id)
-  })
+  
+  bookingQueries.deleteByUserId.run(req.user.id, bookingId)
+  console.log(`❌ Booking deleted: ${booking.guest_name}`)
+  
+  res.json({ message: 'Booking deleted', booking: formatBooking(booking) })
 })
 
 // ============================================
-// DEMO ENDPOINTS
+// AUTH ENDPOINTS
 // ============================================
 
-// Generate a random booking (finds available slot)
-app.post('/api/demo/random-booking', (req, res) => {
-  // Try each room until we find one with availability
-  const shuffledRooms = [...ROOMS].sort(() => Math.random() - 0.5)
+app.post('/api/auth/register', (req, res) => {
+  const { email, password, name } = req.body
   
-  for (const roomNumber of shuffledRooms) {
-    const slot = findAvailableSlot(roomNumber)
-    if (slot) {
-      // Double-check no overlap before adding
-      if (hasOverlap(roomNumber, slot.checkIn, slot.checkOut)) {
-        console.log(`⚠️ Slot ${slot.checkIn} → ${slot.checkOut} in ${roomNumber} has overlap, skipping`)
-        continue
-      }
-      
-      const guestName = generateGuestName()
-      const newBooking = {
-        id: nextBookingId++,
-        platform: PLATFORMS[Math.floor(Math.random() * PLATFORMS.length)],
-        guestName,
-        guestEmail: generateEmail(guestName),
-        roomNumber,
-        checkIn: slot.checkIn,
-        checkOut: slot.checkOut,
-        status: 'CONFIRMED',
-        createdAt: new Date().toISOString()
-      }
-      
-      bookings.push(newBooking)
-      console.log(`📥 New booking: ${newBooking.guestName} in Room ${roomNumber} (${slot.checkIn} → ${slot.checkOut})`)
-      
-      return res.status(201).json({
-        ...newBooking,
-        color: getBookingColor(newBooking.id)
-      })
-    }
+  if (!email || !password || !name) {
+    return res.status(400).json({ error: 'Missing fields' })
   }
   
-  res.status(409).json({ error: 'No available slots' })
-})
-
-// Cancel a random booking
-app.post('/api/demo/random-cancel', (req, res) => {
-  if (bookings.length === 0) {
-    return res.status(404).json({ error: 'No bookings to cancel' })
+  const existing = userQueries.findByEmail.get(email.toLowerCase())
+  if (existing) {
+    return res.status(409).json({ error: 'User already exists' })
   }
   
-  const randomIndex = Math.floor(Math.random() * bookings.length)
-  const cancelledBooking = bookings.splice(randomIndex, 1)[0]
+  const salt = crypto.randomBytes(8).toString('hex')
+  const passwordHash = hashPassword(password, salt)
   
-  console.log(`❌ Cancelled: ${cancelledBooking.guestName} in Room ${cancelledBooking.roomNumber}`)
+  const result = userQueries.create.run(name, email.toLowerCase(), salt, passwordHash)
+  const user = userQueries.getById.get(result.lastInsertRowid)
+  // Ensure new accounts have a property row (scoped by user_id).
+  const property = ensurePropertyRowForUser({ id: user.id, name: user.name, email: user.email })
   
-  res.json({
-    message: 'Booking cancelled',
-    booking: {
-      ...cancelledBooking,
-      color: getBookingColor(cancelledBooking.id)
-    }
+  res.status(201).json({ 
+    token: generateToken(user.email), 
+    user: { id: user.id, name: user.name, email: user.email },
+    setupCompleted: Boolean(property?.setup_completed)
   })
 })
 
-// Start the server
+app.post('/api/auth/login', (req, res) => {
+  const { email, password } = req.body
+  const user = userQueries.findByEmail.get((email || '').toLowerCase())
+  
+  if (!user) {
+    return res.status(401).json({ error: 'Invalid credentials' })
+  }
+  
+  const passwordHash = hashPassword(password, user.salt)
+  if (passwordHash !== user.password_hash) {
+    return res.status(401).json({ error: 'Invalid credentials' })
+  }
+
+  const property = ensurePropertyRowForUser({ id: user.id, name: user.name, email: user.email })
+  
+  res.json({ 
+    token: generateToken(user.email), 
+    user: { id: user.id, name: user.name, email: user.email },
+    setupCompleted: Boolean(property?.setup_completed)
+  })
+})
+
+app.post('/api/auth/forgot', (req, res) => {
+  const { email } = req.body
+  const user = userQueries.findByEmail.get((email || '').toLowerCase())
+  
+  if (!user) {
+    return res.json({ message: 'If the email exists, a reset link was sent (simulated).' })
+  }
+  
+  res.json({ message: `Reset link sent to ${email} (simulated).` })
+})
+
+app.get('/api/auth/me', (req, res) => {
+  const token = getTokenFromRequest(req)
+  if (!token) return res.status(401).json({ error: 'Unauthenticated' })
+
+  const user = getUserFromToken(token)
+  if (!user) return res.status(401).json({ error: 'Unauthenticated' })
+
+  const property = propertyQueries.getByUserId.get(user.id)
+  res.json({ id: user.id, name: user.name, email: user.email, setupCompleted: Boolean(property?.setup_completed) })
+})
+
+// ============================================
+// START SERVER
+// ============================================
+
 app.listen(PORT, '127.0.0.1', () => {
+  const bookingCount = db.prepare('SELECT COUNT(*) as count FROM bookings').get().count
   console.log(`🚀 Backend server running at http://127.0.0.1:${PORT}`)
-  console.log(`📊 Loaded ${bookings.length} confirmed bookings`)
-  console.log(`🏠 Rooms: ${ROOMS.join(', ')} (Private rooms - no overlapping bookings)`)
+  console.log(`📊 Database loaded with ${bookingCount} bookings`)
+  console.log(`🏠 Rooms: ${ROOMS.join(', ')} (Private rooms - no overlapping allowed)`)
+})
+
+// Graceful shutdown
+process.on('SIGINT', () => {
+  db.close()
+  console.log('\n👋 Database closed')
+  process.exit(0)
 })
