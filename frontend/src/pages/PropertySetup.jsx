@@ -221,18 +221,6 @@ function PropertySetup() {
                 Beds per Dorm
                 <input name="bedsPerDorm" type="number" min="0" value={form.bedsPerDorm} onChange={handleChange} required />
               </label>
-              <label>
-                Current Guests
-                <input name="currentGuests" type="number" min="0" value={form.currentGuests} onChange={handleChange} />
-              </label>
-              <label>
-                Check-ins Today (placeholder)
-                <input name="checkinsToday" type="number" min="0" value={form.checkinsToday} onChange={handleChange} />
-              </label>
-              <label>
-                Cancels Today (placeholder)
-                <input name="cancelsToday" type="number" min="0" value={form.cancelsToday} onChange={handleChange} />
-              </label>
               {error && <div className="auth-error">{error}</div>}
               {message && <div className="auth-success">{message}</div>}
               <button className="auth-btn" type="submit">Save Property</button>

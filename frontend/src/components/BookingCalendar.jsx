@@ -42,6 +42,8 @@ function BookingCalendar({ bookings, rooms }) {
   const [selectedBooking, setSelectedBooking] = useState(null)
   const calendarRef = useRef(null)
   const todayRef = useRef(null)
+  const [dayCellWidth, setDayCellWidth] = useState(60)
+  const dayCellWidthRef = useRef(60)
   
   // Update to show month of latest booking when bookings change (only if calendar is empty)
   useEffect(() => {
@@ -79,6 +81,30 @@ function BookingCalendar({ bookings, rooms }) {
     return { days: list, monthStart: start, monthEnd: end }
   }, [currentDate])
 
+  const measureDayCellWidth = useCallback(() => {
+    const root = calendarRef.current
+    if (!root) return
+    // Prefer day slot width (matches booking track).
+    const el = root.querySelector('.day-slot') || root.querySelector('.day-cell')
+    if (!el) return
+    const w = el.getBoundingClientRect().width
+    if (!w || Number.isNaN(w)) return
+    // Avoid rerenders for tiny sub-pixel changes.
+    if (Math.abs(w - dayCellWidthRef.current) < 0.5) return
+    dayCellWidthRef.current = w
+    setDayCellWidth(w)
+  }, [])
+
+  useEffect(() => {
+    // Measure after render (days/rooms changes affect layout).
+    requestAnimationFrame(() => measureDayCellWidth())
+  }, [measureDayCellWidth, days.length, rooms.length])
+
+  useEffect(() => {
+    window.addEventListener('resize', measureDayCellWidth)
+    return () => window.removeEventListener('resize', measureDayCellWidth)
+  }, [measureDayCellWidth])
+
   const dayMeta = useMemo(() => {
     return days.map((day) => ({
       day,
@@ -92,7 +118,7 @@ function BookingCalendar({ bookings, rooms }) {
     const map = new Map()
     for (const booking of bookings || []) {
       const checkIn = new Date(booking.checkIn + 'T00:00:00')
-      const checkOut = new Date(booking.checkOut + 'T00:00:00') // exclusive
+      const checkOut = new Date(booking.checkOut + 'T23:59:59') // inclusive
       const overlaps = checkIn <= monthEnd && checkOut >= monthStart
       if (!overlaps) continue
 
@@ -103,6 +129,20 @@ function BookingCalendar({ bookings, rooms }) {
     }
     return map
   }, [bookings, monthStart, monthEnd])
+
+  const roomBoundaries = useMemo(() => {
+    const result = new Map()
+    for (const [roomNumber, list] of bookingsByRoom.entries()) {
+      const checkIns = new Set()
+      const checkOuts = new Set()
+      for (const b of list) {
+        if (b.checkIn) checkIns.add(b.checkIn)
+        if (b.checkOut) checkOuts.add(b.checkOut)
+      }
+      result.set(roomNumber, { checkIns, checkOuts })
+    }
+    return result
+  }, [bookingsByRoom])
 
   // Navigate months
   const goToPreviousMonth = () => {
@@ -144,8 +184,11 @@ function BookingCalendar({ bookings, rooms }) {
 
   const findBookingForCell = useCallback((roomNumber, dateStr) => {
     const roomBookings = bookingsByRoom.get(roomNumber) || []
-    // Booking interval: [checkIn, checkOut) (checkout day is not occupied).
-    return roomBookings.find(b => dateStr >= b.checkIn && dateStr < b.checkOut) || null
+    // A room can have both a checkout and a checkin on the same day.
+    const matches = roomBookings.filter(b => dateStr >= b.checkIn && dateStr <= b.checkOut)
+    if (matches.length === 0) return null
+    // Prefer the booking that starts today (check-in), otherwise fall back.
+    return matches.find(b => b.checkIn === dateStr) || matches[0]
   }, [bookingsByRoom])
 
   const openGuestModalForCell = useCallback((roomNumber, dateStr) => {
@@ -268,23 +311,27 @@ function BookingCalendar({ bookings, rooms }) {
     
     // Parse check-in and check-out dates (YYYY-MM-DD format)
     // Check-in: Jan 14 means guest arrives on Jan 14
-    // Booking interval: [checkIn, checkOut) (checkout day is not occupied).
+    // Render split days when checkout/checkin are on the same day.
     const [checkInYear, checkInMonth, checkInDay] = booking.checkIn.split('-').map(Number)
     const [checkOutYear, checkOutMonth, checkOutDay] = booking.checkOut.split('-').map(Number)
     
     const checkIn = new Date(checkInYear, checkInMonth - 1, checkInDay, 0, 0, 0)
-    const checkOutExclusive = new Date(checkOutYear, checkOutMonth - 1, checkOutDay, 0, 0, 0)
-    const checkOutInclusive = new Date(checkOutExclusive)
-    checkOutInclusive.setDate(checkOutInclusive.getDate() - 1)
+    const checkOut = new Date(checkOutYear, checkOutMonth - 1, checkOutDay, 0, 0, 0)
     
     const monthStart = new Date(days[0])
     monthStart.setHours(0, 0, 0, 0)
     const monthEnd = new Date(days[days.length - 1])
     monthEnd.setHours(23, 59, 59, 999)
 
+    const monthStartStr = dayMeta[0]?.dateStr
+    const monthEndStr = dayMeta[dayMeta.length - 1]?.dateStr
+    const boundary = roomBoundaries.get(booking.roomNumber)
+    const hasPrevCheckoutSameDay = Boolean(boundary?.checkOuts?.has(booking.checkIn))
+    const hasNextCheckinSameDay = Boolean(boundary?.checkIns?.has(booking.checkOut))
+
     // Clamp dates to current month view
     const displayStart = checkIn < monthStart ? monthStart : checkIn
-    const displayEnd = checkOutInclusive > monthEnd ? monthEnd : checkOutInclusive
+    const displayEnd = checkOut > monthEnd ? monthEnd : checkOut
 
     // Calculate day index from month start (0-indexed)
     // Jan 1 = day 1 of month = index 0
@@ -292,14 +339,23 @@ function BookingCalendar({ bookings, rooms }) {
     const startDay = displayStart.getDate() // 14
     const endDay = displayEnd.getDate() // 15
     
-    const startDayIndex = startDay - 1 // 0-indexed: day 14 = index 13
-    const endDayIndex = endDay - 1 // 0-indexed: day 15 = index 14
-    const duration = Math.max(1, endDayIndex - startDayIndex + 1) // +1 to include both days
+    const startDayIndex = startDay - 1
+    const endDayIndex = endDay - 1
 
-    // Each day cell is ~60px wide on desktop
-    const dayWidth = 60
-    const left = startDayIndex * dayWidth
-    const width = duration * dayWidth - 4 // -4 for gap
+    const bookingStartsInView = monthStartStr && booking.checkIn >= monthStartStr && booking.checkIn <= monthEndStr
+    const bookingEndsInView = monthStartStr && booking.checkOut >= monthStartStr && booking.checkOut <= monthEndStr
+
+    const startOffset = bookingStartsInView && hasPrevCheckoutSameDay ? 0.5 : 0
+    const endOffset = bookingEndsInView && hasNextCheckinSameDay ? 0.5 : 1
+
+    let startUnit = startDayIndex + startOffset
+    let endUnit = endDayIndex + endOffset
+    if (endUnit <= startUnit) endUnit = startUnit + 0.5
+
+    // Use actual rendered day width (mobile breakpoints use 50/44px).
+    const dayWidth = dayCellWidth || 60
+    const left = startUnit * dayWidth
+    const width = (endUnit - startUnit) * dayWidth - 4 // -4 for gap
 
     const style = {
       left: `${left}px`,
@@ -315,7 +371,6 @@ function BookingCalendar({ bookings, rooms }) {
       endDay,
       startDayIndex,
       endDayIndex,
-      duration,
       left: style.left,
       width: style.width
     })
