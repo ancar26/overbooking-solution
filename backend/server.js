@@ -7,7 +7,7 @@ import crypto from 'crypto'
 import db, { userQueries, propertyQueries, bookingQueries } from './database.js'
 
 const app = express()
-const PORT = 3000
+const PORT = process.env.PORT || 3000;
 
 app.use(cors())
 app.use(express.json())
@@ -15,6 +15,10 @@ app.use(express.json())
 // ============================================
 // HELPER FUNCTIONS
 // ============================================
+
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
 
 const ROOMS = ['A1', 'A2', 'B1', 'B2']
 const ROOM_LABELS = {
