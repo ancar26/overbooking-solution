@@ -13,12 +13,18 @@ export function getAuthUser() {
 }
 
 export function apiFetch(url, options = {}) {
+  const baseUrl = (import.meta?.env?.VITE_API_URL || '').replace(/\/+$/, '')
   const token = getAuthToken()
   const headers = {
     ...(options.headers || {}),
     ...(token ? { Authorization: `Bearer ${token}` } : {})
   }
 
-  return fetch(url, { ...options, headers })
+  const finalUrl =
+    typeof url === 'string' && url.startsWith('/') && baseUrl
+      ? `${baseUrl}${url}`
+      : url
+
+  return fetch(finalUrl, { ...options, headers })
 }
 

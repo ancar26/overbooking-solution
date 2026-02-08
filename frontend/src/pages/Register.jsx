@@ -1,8 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import '../styles/Pages.css'
-
-const API_URL = '/api/auth'
+import { apiFetch } from '../utils/api'
 
 function Register() {
   const navigate = useNavigate()
@@ -17,7 +16,7 @@ function Register() {
     setError(null)
     setLoading(true)
     try {
-      const res = await fetch(`${API_URL}/register`, {
+      const res = await apiFetch(`/api/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, email, password })
