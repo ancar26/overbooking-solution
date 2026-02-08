@@ -9,16 +9,28 @@ import db, { userQueries, propertyQueries, bookingQueries } from './database.js'
 const app = express()
 const PORT = process.env.PORT || 3000;
 
-app.use(cors())
+const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || process.env.CORS_ORIGIN || ''
+const ALLOWED_ORIGINS = [
+  // Local dev (Vite)
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  // Optional production origin (Render static site)
+  ...(FRONTEND_ORIGIN ? [FRONTEND_ORIGIN] : [])
+]
+
+app.use(cors({
+  origin(origin, cb) {
+    // Allow non-browser clients (no Origin header) like curl/Postman/Render health checks.
+    if (!origin) return cb(null, true)
+    if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true)
+    return cb(new Error(`CORS blocked for origin: ${origin}`))
+  }
+}))
 app.use(express.json())
 
 // ============================================
 // HELPER FUNCTIONS
 // ============================================
-
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
 
 const ROOMS = ['A1', 'A2', 'B1', 'B2']
 const ROOM_LABELS = {
@@ -626,9 +638,9 @@ app.get('/api/auth/me', (req, res) => {
 // START SERVER
 // ============================================
 
-app.listen(PORT, '127.0.0.1', () => {
+app.listen(PORT, '0.0.0.0', () => {
   const bookingCount = db.prepare('SELECT COUNT(*) as count FROM bookings').get().count
-  console.log(`🚀 Backend server running at http://127.0.0.1:${PORT}`)
+  console.log(`🚀 Backend server running on port ${PORT}`)
   console.log(`📊 Database loaded with ${bookingCount} bookings`)
   console.log(`🏠 Rooms: ${ROOMS.join(', ')} (Private rooms - no overlapping allowed)`)
 })

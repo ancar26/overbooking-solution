@@ -3,12 +3,18 @@ import Database from 'better-sqlite3'
 import crypto from 'crypto'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import fs from 'fs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 // Create/open database file
-const db = new Database(path.join(__dirname, 'booking-calendar.db'))
+// On Render, use a persistent disk and set DB_FILE to something like: /var/data/booking-calendar.db
+const DB_FILE = process.env.DB_FILE || path.join(__dirname, 'booking-calendar.db')
+try {
+  fs.mkdirSync(path.dirname(DB_FILE), { recursive: true })
+} catch {}
+const db = new Database(DB_FILE)
 
 // Enable foreign keys
 db.pragma('foreign_keys = ON')
