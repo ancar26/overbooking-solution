@@ -14,7 +14,7 @@ const EXTRA_ALLOWED_ORIGINS = FRONTEND_ORIGIN
   .split(',')
   .map(s => s.trim())
   .filter(Boolean)
-  
+
 const ALLOWED_ORIGINS = [
   // Local dev (Vite)
   'http://localhost:5173',
@@ -23,15 +23,31 @@ const ALLOWED_ORIGINS = [
   // Optional production origin (Render static site)
 ]
 
-app.use(cors({
-  origin(origin, cb) {
-    // Allow non-browser clients (no Origin header) like curl/Postman/Render health checks.
-    if (!origin) return cb(null, true)
-    if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true)
-    // Don’t throw (avoids noisy stack traces in logs); just block the request.
-    return cb(null, false)
-  }
-}))
+import cors from "cors";
+
+const allowedOrigins = [
+  "https://justbooked.org",
+  "https://www.justbooked.org",
+  "https://overbooking-solution-frontend-geok0n8pm-ancar26s-projects.vercel.app"
+];
+
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      // allow requests with no origin (mobile apps, curl, health checks)
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      console.log("Blocked by CORS:", origin);
+      callback(new Error("Not allowed by CORS"));
+    },
+    credentials: true,
+  })
+);
+
 app.use(express.json())
 
 // ============================================
