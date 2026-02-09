@@ -10,12 +10,17 @@ const app = express()
 const PORT = process.env.PORT || 3000;
 
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || process.env.CORS_ORIGIN || ''
+const EXTRA_ALLOWED_ORIGINS = FRONTEND_ORIGIN
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean)
+  
 const ALLOWED_ORIGINS = [
   // Local dev (Vite)
   'http://localhost:5173',
   'http://127.0.0.1:5173',
-  // Optional production origin (Render static site)
   ...(FRONTEND_ORIGIN ? [FRONTEND_ORIGIN] : [])
+  // Optional production origin (Render static site)
 ]
 
 app.use(cors({
@@ -23,7 +28,8 @@ app.use(cors({
     // Allow non-browser clients (no Origin header) like curl/Postman/Render health checks.
     if (!origin) return cb(null, true)
     if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true)
-    return cb(new Error(`CORS blocked for origin: ${origin}`))
+    // Don’t throw (avoids noisy stack traces in logs); just block the request.
+    return cb(null, false)
   }
 }))
 app.use(express.json())
