@@ -14,24 +14,45 @@ const EXTRA_ALLOWED_ORIGINS = FRONTEND_ORIGIN
   .split(',')
   .map(s => s.trim())
   .filter(Boolean)
-  
+
 const ALLOWED_ORIGINS = [
   // Local dev (Vite)
   'http://localhost:5173',
   'http://127.0.0.1:5173',
-  ...(FRONTEND_ORIGIN ? [FRONTEND_ORIGIN] : [])
-  // Optional production origin (Render static site)
+  // Allow your production domains and any additional origins passed via env
+  ...EXTRA_ALLOWED_ORIGINS
 ]
 
-app.use(cors({
+function originMatches(allowed, origin) {
+  if (allowed === origin) return true
+  // Support wildcard entries like:
+  // - https://*.vercel.app
+  // - https://*.ancar26s-projects.vercel.app
+  if (allowed.includes('*')) {
+    const escaped = allowed
+      .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+      .replace(/\\\*/g, '.*')
+    return new RegExp(`^${escaped}$`).test(origin)
+  }
+  return false
+}
+
+const corsOptions = {
   origin(origin, cb) {
     // Allow non-browser clients (no Origin header) like curl/Postman/Render health checks.
     if (!origin) return cb(null, true)
-    if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true)
-    // Don’t throw (avoids noisy stack traces in logs); just block the request.
+    if (ALLOWED_ORIGINS.some(a => originMatches(a, origin))) return cb(null, true)
+    // Block without noisy stack traces in logs.
     return cb(null, false)
-  }
-}))
+  },
+  methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Auth-Token'],
+  optionsSuccessStatus: 204
+}
+
+app.use(cors(corsOptions))
+app.options('*', cors(corsOptions))
+
 app.use(express.json())
 
 // ============================================
