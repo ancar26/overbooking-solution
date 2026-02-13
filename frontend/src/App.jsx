@@ -63,9 +63,9 @@ function App() {
   const requireAuth = (element) =>
     isAuthenticated ? element : <Navigate to="/login" replace />
 
-  const requireSetup = (element) =>
+/*  const requireSetup = (element) =>
     isSetupCompleted ? element : <Navigate to="/property" replace />
-
+*/
   const requireAuthAndSetup = (element) =>
     isAuthenticated ? (isSetupCompleted ? element : <Navigate to="/property" replace />) : <Navigate to="/login" replace />
 
