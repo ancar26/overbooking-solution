@@ -55,3 +55,23 @@ test('notification bell opens, shows activity, and can clear all', async ({ page
   await expect(page.getByText('No recent activity')).toBeVisible()
 })
 
+test('opening the notifications dropdown marks all as read (badge disappears)', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.removeItem('booking-calendar-notifications')
+  })
+
+  await page.goto('/bookings')
+
+  const bellButton = page.locator('.notification-bell .bell-button')
+  const badge = page.locator('.notification-bell .bell-badge')
+
+  await expect(bellButton).toBeVisible()
+  await expect(badge).toBeVisible()
+
+  await bellButton.click()
+  await expect(page.getByText('Recent Activity')).toBeVisible()
+
+  // NotificationBell calls onMarkAllRead after 500ms when opening.
+  await expect(badge).toHaveCount(0, { timeout: 3000 })
+})
+
