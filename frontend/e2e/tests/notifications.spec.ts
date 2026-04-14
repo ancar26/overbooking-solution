@@ -10,7 +10,8 @@ test.beforeEach(async ({ page }) => {
     )
   })
 
-  // Mock backend calls required for BookingsStatus.
+  // Mock backend calls required for the /bookings shell to render.
+  // Notification behavior itself is localStorage/UI-driven.
   await page.route('**/api/auth/me', (route) =>
     route.fulfill({
       status: 200,
@@ -34,7 +35,7 @@ test.beforeEach(async ({ page }) => {
 })
 
 test('notification bell opens, shows activity, and can clear all', async ({ page }) => {
-  // Ensure we start from a clean notification storage so the seed happens.
+  // Ensure we start from a clean notification storage so component seed logic runs.
   await page.addInitScript(() => {
     localStorage.removeItem('booking-calendar-notifications')
   })

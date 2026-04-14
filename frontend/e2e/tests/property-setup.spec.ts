@@ -1,6 +1,8 @@
 import { test, expect } from '@playwright/test'
 
 function disableLongDemoTimeouts(page) {
+  // Production code triggers long demo timers; shorten test runtime by neutralizing them.
+  // Prefer this over hard waits in tests.
   return page.addInitScript(() => {
     const original = window.setTimeout
     window.setTimeout = ((fn, timeout, ...args) => {
@@ -11,6 +13,8 @@ function disableLongDemoTimeouts(page) {
 }
 
 async function mockCommonAuthedApi(page, { setupCompleted }) {
+  // Shared fixture-style helper:
+  // centralize common mocks so tests stay focused on scenario differences.
   const user = { name: 'E2E User', email: 'e2e@example.com', setupCompleted }
   const profile = { propertyName: 'E2E Property', name: 'E2E User', email: 'e2e@example.com' }
 
@@ -74,7 +78,8 @@ test('saving property with setupCompleted=true navigates to /bookings and unlock
 
   await mockCommonAuthedApi(page, { setupCompleted: false })
 
-  // PropertySetup loads initial values from GET /api/property, then saves via POST /api/property.
+  // Route handler acts like a tiny in-memory backend:
+  // GET returns initial state, POST returns persisted state transition.
   await page.route('**/api/property', async (route) => {
     const method = route.request().method()
     if (method === 'GET') {

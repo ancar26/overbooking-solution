@@ -1,7 +1,9 @@
 import { test, expect } from '@playwright/test'
 
 test('login with valid credentials', async ({ page }) => {
-  // Avoid depending on a real backend in E2E.
+  // Test architecture choice:
+  // keep this as a frontend contract test by mocking API edges at the network boundary.
+  // This validates UI flow + request wiring without requiring backend fixtures.
   await page.route('**/api/auth/login', async (route) => {
     if (route.request().method() !== 'POST') return route.fallback()
     return route.fulfill({

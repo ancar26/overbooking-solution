@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test'
 
 test.beforeEach(async ({ page }) => {
-  // Seed auth state so routes unlock.
+  // Seed app auth state before any app code executes.
+  // addInitScript runs early, making this equivalent to "already logged in".
   await page.addInitScript(() => {
     localStorage.setItem('authToken', 'e2e-token')
     localStorage.setItem(
@@ -10,7 +11,8 @@ test.beforeEach(async ({ page }) => {
     )
   })
 
-  // Minimal API mocks so pages can render without backend.
+  // Minimal dependency graph for this suite:
+  // mock only endpoints needed to render navigation + first page data.
   await page.route('**/api/auth/me', (route) =>
     route.fulfill({
       status: 200,

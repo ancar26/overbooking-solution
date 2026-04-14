@@ -12,6 +12,8 @@ function disableLongDemoTimeouts(page) {
 }
 
 async function seedAuthedSession(page) {
+  // Session seeding models login as a precondition, so each test starts
+  // directly at calendar behavior instead of auth behavior.
   await page.addInitScript(() => {
     localStorage.setItem('authToken', 'e2e-token')
     localStorage.setItem(
@@ -22,6 +24,8 @@ async function seedAuthedSession(page) {
 }
 
 async function mockApi(page) {
+  // Deterministic data fixture for the calendar surface:
+  // room list + one booking make UI assertions stable and readable.
   const user = { name: 'E2E User', email: 'e2e@example.com', setupCompleted: true }
   const profile = { propertyName: 'E2E Property', name: 'E2E User', email: 'e2e@example.com' }
   const rooms = [
@@ -57,6 +61,7 @@ async function mockApi(page) {
 }
 
 test.beforeEach(async ({ page }) => {
+  // Standardized suite boot sequence: timers -> auth -> network fixtures.
   await disableLongDemoTimeouts(page)
   await seedAuthedSession(page)
   await mockApi(page)
